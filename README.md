@@ -1,2 +1,82 @@
 # payments-cdc-observability
-.
+
+A data platform that fits in a `docker compose up` and hides none of the boring parts.
+
+> **Status: work in progress.** Milestone 1 of 3 (ingestion and schema contracts) is under
+> construction. This README grows with the project; sections marked *planned* are not built
+> yet.
+
+Most portfolio data projects prove the happy path: call an API, load, transform, show a
+dashboard. This one is about the parts that production demands and portfolios skip —
+schema contracts, lineage, PII masking, idempotent backfill, observability, and failure
+modes you can trigger with one command.
+
+The source is a local Postgres OLTP read through **logical replication**, decoded by a
+CDC consumer written for this repository — no Debezium, no Airbyte. Change data capture
+is the risky part, so it was built first.
+
+## Failure modes
+
+*Planned — the table lands with Milestone 3.* Every row will name the command that injects
+the failure, what should catch it, and whether it actually does. Including the row that
+says "no, and here is exactly why".
+
+## Architecture
+
+*Planned — diagram lands with Milestone 2.*
+
+## Requirements
+
+- Docker Desktop, running
+- Python 3.11 or newer
+
+## Quick start
+
+```
+cp .env.example .env
+docker compose up -d
+pip install -r requirements.txt
+python -m ingestion.cdc.consumer
+```
+
+The consumer prints one JSON object per change to stdout. Set `CDC_OUTPUT` to write to a
+file instead, and `CDC_IDLE_TIMEOUT` to a number of seconds to make it exit once the
+stream goes quiet.
+
+`.env` holds local-only credentials for the throwaway container and is not committed.
+`.env.example` carries the same values and is — there is no secret here to protect.
+
+Postgres is published on **port 5434**, not 5432, to avoid colliding with an existing
+local instance.
+
+### Changing the database schema
+
+The scripts in `db/init/` run **only when the Postgres volume is empty**. Editing them and
+restarting the container does nothing. To apply schema changes, destroy the volume:
+
+```
+make reset
+```
+
+This drops the database, its data, and every replication slot. There is no in-place
+migration path by design: the OLTP here is a synthetic fixture, not something to preserve.
+
+## Decision records
+
+Short documents in `docs/adr/`, written before the decision, in Portuguese. The field that
+matters most is *rejected alternatives and why*.
+
+| ADR | Decision |
+|---|---|
+| 0001 | Own CDC consumer reading `pgoutput`, instead of Debezium, Airbyte or `wal2json` |
+| 0002 | Deduplication keyed on per-message LSN, not commit LSN and not `updated_at` |
+| 0008 | State lives in the replication slot and in the data, never in a side file |
+| 0009 | Dedicated replication role, and where its password lives |
+
+## Scope
+
+No cloud, no Kafka, no real streaming, no custom front end, no machine learning, no
+authentication, no performance tuning. The volume is small on purpose. The point is
+completeness of practice in miniature, not scale.
+
+All data is synthetic or from public sources.
