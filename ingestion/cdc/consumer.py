@@ -10,6 +10,8 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import LogicalReplicationConnection
 
+from contracts.tables import contract_for
+from contracts.validation import ContractViolation, validate_change, validate_relation
 from ingestion.cdc.pgoutput import (
     Begin,
     Commit,
@@ -221,6 +223,11 @@ def run(writer: BronzeWriter) -> int:
             if isinstance(decoded, Begin):
                 transaction = decoded
             elif isinstance(decoded, Relation):
+                validate_relation(
+                    decoded,
+                    contract_for(decoded.namespace, decoded.name),
+                    format_lsn(transaction.final_lsn) if transaction else None,
+                )
                 continue
             elif isinstance(decoded, Commit):
                 transaction = None
@@ -235,6 +242,13 @@ def run(writer: BronzeWriter) -> int:
                         "change on {} arrived outside a transaction; the stream is out "
                         "of sync".format(decoded.relation.qualified_name)
                     )
+                validate_change(
+                    decoded,
+                    contract_for(
+                        decoded.relation.namespace, decoded.relation.name
+                    ),
+                    format_lsn(message.data_start),
+                )
                 if not pending:
                     opened_at = datetime.now(timezone.utc)
                 pending.append(
@@ -258,7 +272,11 @@ def main() -> int:
     if discarded:
         print("discarded {} stale staging file(s)".format(discarded), file=sys.stderr)
     print("slot {} ({})".format(slot_name(), ensure_slot()), file=sys.stderr)
-    written = run(writer)
+    try:
+        written = run(writer)
+    except ContractViolation as violation:
+        print("contract violation: {}".format(violation), file=sys.stderr)
+        return 2
     print("records written: {}".format(written), file=sys.stderr)
     return 0
 
