@@ -55,6 +55,10 @@ def batch_max_seconds() -> float:
     return float(os.environ.get("CDC_BATCH_MAX_SECONDS", "5"))
 
 
+def fail_before_feedback() -> bool:
+    return os.environ.get("CDC_FAIL_BEFORE_FEEDBACK", "") not in ("", "0")
+
+
 @dataclass(frozen=True)
 class PendingRecord:
     lsn: int
@@ -164,6 +168,15 @@ def _batch_is_full(pending: list, opened_at: datetime) -> bool:
 
 def _flush(writer: BronzeWriter, cursor, pending: list, confirm_lsn: int) -> int:
     paths = writer.write(pending)
+    if fail_before_feedback():
+        print(
+            "fault injection: dying after writing {} records, before confirming {}".format(
+                len(pending), format_lsn(confirm_lsn)
+            ),
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
+        os._exit(17)
     cursor.send_feedback(flush_lsn=confirm_lsn, force=True)
     print(
         "flushed {} records into {} file(s), confirmed {}".format(
