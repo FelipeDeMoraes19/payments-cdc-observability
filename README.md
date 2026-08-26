@@ -11,9 +11,11 @@ dashboard. This one is about the parts that production demands and portfolios sk
 schema contracts, lineage, PII masking, idempotent backfill, observability, and failure
 modes you can trigger with one command.
 
-The source is a local Postgres OLTP read through **logical replication**, decoded by a
-CDC consumer written for this repository — no Debezium, no Airbyte. Change data capture
-is the risky part, so it was built first.
+There are two sources on purpose, because a real platform never has one ingestion
+pattern. A local Postgres OLTP is read through **logical replication**, decoded by a CDC
+consumer written for this repository — no Debezium, no Airbyte. Daily exchange rates come
+from the Brazilian central bank as an **incremental batch** with a watermark. Change data
+capture is the risky part, so it was built first.
 
 ## Failure modes
 
@@ -104,6 +106,24 @@ Note the ordering column. The LSN is stored twice: `lsn` as the text Postgres pr
 row is the kind of bug that only shows up after a few hundred megabytes of WAL. ADR 0013
 has the measurement.
 
+### Exchange rates
+
+```
+make fx
+```
+
+Daily PTAX sell rates from the Brazilian central bank, one SGS series per currency, into
+`data/bronze/fx/<currency>/month=<YYYY-MM>/observations.parquet`. The whole month is
+rewritten on every run, so resuming and backfilling are the same operation and running it
+twice changes no observation.
+
+The watermark is the latest quote date already in the bronze — there is no state file to
+disagree with the data. Set `FX_START_DATE` and `FX_END_DATE` to extract an explicit
+window instead.
+
+Days with no quote are simply absent: weekends and holidays have no PTAX. That gap is
+real, and later it is what a missing `amount_brl` will be traced back to.
+
 ### Schema contracts
 
 Every published table is declared in `contracts/`: its columns, their Postgres types, and
@@ -149,6 +169,7 @@ matters most is *rejected alternatives and why*.
 | 0011 | The contract is checked on the `Relation` message, and what it deliberately skips |
 | 0012 | `TRUNCATE` is recorded as an event, and what that does not yet solve |
 | 0013 | Bronze in Parquet, the tuple as a `MAP`, and the LSN stored twice |
+| 0014 | The BCB extractor: SGS series, monthly windows, watermark in the data |
 
 ## Scope
 

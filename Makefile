@@ -1,4 +1,4 @@
-.PHONY: up down reset seed cdc test slots
+.PHONY: up down reset seed cdc fx test slots
 
 up:
 	docker compose up -d
@@ -15,6 +15,9 @@ seed:
 
 cdc:
 	python -m ingestion.cdc.consumer
+
+fx:
+	python -m ingestion.batch.bcb_fx
 
 test:
 	python -m pytest tests -v
