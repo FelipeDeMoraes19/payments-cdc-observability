@@ -48,6 +48,9 @@ class ColumnContract:
     name: str
     type_name: str
     is_key: bool = False
+    precision: Optional[int] = None
+    scale: Optional[int] = None
+    pii: bool = False
 
     @property
     def type_oid(self) -> int:
@@ -82,8 +85,8 @@ CUSTOMERS = TableContract(
     columns=(
         ColumnContract("customer_id", "int8", is_key=True),
         ColumnContract("full_name", "text"),
-        ColumnContract("email", "text"),
-        ColumnContract("cpf", "bpchar"),
+        ColumnContract("email", "text", pii=True),
+        ColumnContract("cpf", "bpchar", pii=True),
         ColumnContract("created_at", "timestamptz"),
         ColumnContract("updated_at", "timestamptz"),
     ),
@@ -111,7 +114,7 @@ PAYMENTS = TableContract(
         ColumnContract("payment_id", "int8", is_key=True),
         ColumnContract("customer_id", "int8"),
         ColumnContract("merchant_id", "int8"),
-        ColumnContract("amount", "numeric"),
+        ColumnContract("amount", "numeric", precision=14, scale=2),
         ColumnContract("currency", "bpchar"),
         ColumnContract("status", "text"),
         ColumnContract("created_at", "timestamptz"),
