@@ -1,4 +1,4 @@
-.PHONY: up down reset seed cdc fx test slots
+.PHONY: up down reset seed cdc fx spark-build spark-shell test slots
 
 up:
 	docker compose up -d
@@ -18,6 +18,12 @@ cdc:
 
 fx:
 	python -m ingestion.batch.bcb_fx
+
+spark-build:
+	docker compose --profile jobs build spark
+
+spark-shell:
+	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm spark /opt/spark/bin/pyspark --master 'local[*]'
 
 test:
 	python -m pytest tests -v
