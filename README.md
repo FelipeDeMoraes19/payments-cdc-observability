@@ -98,6 +98,7 @@ matters most is *rejected alternatives and why*.
 | 0009 | Dedicated replication role, and where its password lives |
 | 0010 | Where the durability boundary sits, and how batches are flushed |
 | 0011 | The contract is checked on the `Relation` message, and what it deliberately skips |
+| 0012 | `TRUNCATE` is recorded as an event, and what that does not yet solve |
 
 ## Scope
 
