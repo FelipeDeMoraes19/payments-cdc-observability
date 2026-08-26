@@ -39,9 +39,15 @@ pip install -r requirements.txt
 python -m ingestion.cdc.consumer
 ```
 
-The consumer prints one JSON object per change to stdout. Set `CDC_OUTPUT` to write to a
-file instead, and `CDC_IDLE_TIMEOUT` to a number of seconds to make it exit once the
-stream goes quiet.
+The consumer writes one JSON object per change into
+`data/bronze/cdc/<table>/dt=<commit date>/part-<first LSN>-<last LSN>.jsonl`, and confirms
+its position to Postgres only after the file is on disk. Set `CDC_IDLE_TIMEOUT` to a
+number of seconds to make it exit once the stream goes quiet.
+
+Killing the consumer and starting it again loses nothing: it resumes from the last
+position it confirmed. Anything written but not yet confirmed arrives a second time, with
+the same `(key, lsn)` and the same content, which is what the silver layer deduplicates
+on.
 
 `.env` holds local-only credentials for the throwaway container and is not committed.
 `.env.example` carries the same values and is — there is no secret here to protect.

@@ -3,6 +3,7 @@ import os
 import select
 import sys
 from contextlib import closing
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -38,28 +39,65 @@ def publication_name() -> str:
     return os.environ.get("CDC_PUBLICATION", "payments_pub")
 
 
+def bronze_root() -> Path:
+    return Path(os.environ.get("CDC_BRONZE_ROOT", "data/bronze/cdc"))
+
+
 def idle_timeout_seconds() -> float:
     return float(os.environ.get("CDC_IDLE_TIMEOUT", "0"))
 
 
-class JsonlSink:
-    def __init__(self, path=None) -> None:
-        if path:
-            target = Path(path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            self._stream = target.open("a", encoding="utf-8", newline="\n")
-            self._owns_stream = True
-        else:
-            self._stream = sys.stdout
-            self._owns_stream = False
+def batch_max_records() -> int:
+    return int(os.environ.get("CDC_BATCH_MAX_RECORDS", "500"))
 
-    def write(self, record: dict) -> None:
-        self._stream.write(json.dumps(record) + "\n")
-        self._stream.flush()
 
-    def close(self) -> None:
-        if self._owns_stream:
-            self._stream.close()
+def batch_max_seconds() -> float:
+    return float(os.environ.get("CDC_BATCH_MAX_SECONDS", "5"))
+
+
+@dataclass(frozen=True)
+class PendingRecord:
+    lsn: int
+    table: str
+    partition: str
+    payload: dict
+
+
+class BronzeWriter:
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def write(self, pending) -> list:
+        groups = {}
+        for record in pending:
+            groups.setdefault((record.table, record.partition), []).append(record)
+        return [
+            self._write_group(table, partition, groups[(table, partition)])
+            for table, partition in sorted(groups)
+        ]
+
+    def discard_stale_staging(self) -> int:
+        if not self._root.exists():
+            return 0
+        stale = list(self._root.rglob("*.jsonl.tmp"))
+        for path in stale:
+            path.unlink()
+        return len(stale)
+
+    def _write_group(self, table: str, partition: str, records: list) -> Path:
+        directory = self._root / table / "dt={}".format(partition)
+        directory.mkdir(parents=True, exist_ok=True)
+        lsns = [record.lsn for record in records]
+        name = "part-{:016X}-{:016X}.jsonl".format(min(lsns), max(lsns))
+        target = directory / name
+        staging = directory / (name + ".tmp")
+        with staging.open("w", encoding="utf-8", newline="\n") as stream:
+            for record in records:
+                stream.write(json.dumps(record.payload) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staging, target)
+        return target
 
 
 def ensure_slot() -> str:
@@ -111,13 +149,32 @@ def build_record(change, lsn: int, transaction: Begin) -> dict:
     return record
 
 
-def _next_deadline(idle_timeout: float):
-    if idle_timeout <= 0:
+def _deadline(seconds: float):
+    if seconds <= 0:
         return None
-    return datetime.now(timezone.utc) + timedelta(seconds=idle_timeout)
+    return datetime.now(timezone.utc) + timedelta(seconds=seconds)
 
 
-def run(sink: JsonlSink) -> int:
+def _batch_is_full(pending: list, opened_at: datetime) -> bool:
+    if len(pending) >= batch_max_records():
+        return True
+    elapsed = (datetime.now(timezone.utc) - opened_at).total_seconds()
+    return elapsed >= batch_max_seconds()
+
+
+def _flush(writer: BronzeWriter, cursor, pending: list, confirm_lsn: int) -> int:
+    paths = writer.write(pending)
+    cursor.send_feedback(flush_lsn=confirm_lsn, force=True)
+    print(
+        "flushed {} records into {} file(s), confirmed {}".format(
+            len(pending), len(paths), format_lsn(confirm_lsn)
+        ),
+        file=sys.stderr,
+    )
+    return len(pending)
+
+
+def run(writer: BronzeWriter) -> int:
     decoder = Decoder()
     connection = psycopg2.connect(
         connection_factory=LogicalReplicationConnection, **connection_params()
@@ -128,49 +185,68 @@ def run(sink: JsonlSink) -> int:
         decode=False,
         options={"proto_version": "1", "publication_names": publication_name()},
     )
-    idle_timeout = idle_timeout_seconds()
-    deadline = _next_deadline(idle_timeout)
+    exit_deadline = _deadline(idle_timeout_seconds())
+    pending = []
+    opened_at = None
     transaction = None
-    emitted = 0
+    confirm_lsn = None
+    written = 0
     try:
         while True:
             message = cursor.read_message()
             if message is None:
-                if deadline is not None and datetime.now(timezone.utc) >= deadline:
+                if pending and transaction is None:
+                    written += _flush(writer, cursor, pending, confirm_lsn)
+                    pending = []
+                    opened_at = None
+                if exit_deadline is not None and datetime.now(timezone.utc) >= exit_deadline:
                     break
                 select.select([cursor], [], [], 1.0)
                 continue
-            deadline = _next_deadline(idle_timeout)
+            exit_deadline = _deadline(idle_timeout_seconds())
             decoded = decoder.decode(message.payload)
             if isinstance(decoded, Begin):
                 transaction = decoded
-            elif isinstance(decoded, Commit):
-                transaction = None
             elif isinstance(decoded, Relation):
                 continue
+            elif isinstance(decoded, Commit):
+                transaction = None
+                confirm_lsn = message.wal_end
+                if pending and _batch_is_full(pending, opened_at):
+                    written += _flush(writer, cursor, pending, confirm_lsn)
+                    pending = []
+                    opened_at = None
             else:
                 if transaction is None:
                     raise ProtocolError(
                         "change on {} arrived outside a transaction; the stream is out "
                         "of sync".format(decoded.relation.qualified_name)
                     )
-                sink.write(build_record(decoded, message.data_start, transaction))
-                emitted += 1
+                if not pending:
+                    opened_at = datetime.now(timezone.utc)
+                pending.append(
+                    PendingRecord(
+                        lsn=message.data_start,
+                        table=decoded.relation.name,
+                        partition=transaction.commit_time.date().isoformat(),
+                        payload=build_record(decoded, message.data_start, transaction),
+                    )
+                )
     finally:
         cursor.close()
         connection.close()
-    return emitted
+    return written
 
 
 def main() -> int:
     load_env_file()
+    writer = BronzeWriter(bronze_root())
+    discarded = writer.discard_stale_staging()
+    if discarded:
+        print("discarded {} stale staging file(s)".format(discarded), file=sys.stderr)
     print("slot {} ({})".format(slot_name(), ensure_slot()), file=sys.stderr)
-    sink = JsonlSink(os.environ.get("CDC_OUTPUT"))
-    try:
-        emitted = run(sink)
-    finally:
-        sink.close()
-    print("records emitted: {}".format(emitted), file=sys.stderr)
+    written = run(writer)
+    print("records written: {}".format(written), file=sys.stderr)
     return 0
 
 
