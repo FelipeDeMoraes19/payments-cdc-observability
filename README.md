@@ -39,10 +39,13 @@ pip install -r requirements.txt
 python -m ingestion.cdc.consumer
 ```
 
-The consumer writes one JSON object per change into
-`data/bronze/cdc/<table>/dt=<commit date>/part-<first LSN>-<last LSN>.jsonl`, and confirms
-its position to Postgres only after the file is on disk. Set `CDC_IDLE_TIMEOUT` to a
-number of seconds to make it exit once the stream goes quiet.
+`make up`, `make seed`, `make cdc` and `make test` wrap the same commands. Running the
+tests needs `pip install -r requirements-dev.txt` as well.
+
+The consumer writes one row per change into
+`data/bronze/cdc/<table>/dt=<commit date>/part-<first LSN>-<last LSN>.parquet`, and
+confirms its position to Postgres only after the file is on disk. Set `CDC_IDLE_TIMEOUT`
+to a number of seconds to make it exit once the stream goes quiet.
 
 Killing the consumer and starting it again loses nothing: it resumes from the last
 position it confirmed. Anything written but not yet confirmed arrives a second time, with
@@ -54,6 +57,52 @@ on.
 
 Postgres is published on **port 5434**, not 5432, to avoid colliding with an existing
 local instance.
+
+## Querying the bronze
+
+Values are kept exactly as Postgres sent them, as text inside a `MAP`, because deciding
+that a string is a `numeric` is the next layer's job. The layer is still queryable
+directly, with nothing loaded anywhere:
+
+```sql
+SELECT table_name, action, count(*) AS events
+FROM read_parquet('data/bronze/cdc/**/*.parquet')
+GROUP BY table_name, action ORDER BY table_name, action;
+```
+
+```
+customers | update | 27
+payments  | insert | 191
+payments  | update | 73
+```
+
+Change data capture only gives a stream of changes, so the current state of a row is the
+version with the highest LSN. That is one query:
+
+```sql
+SELECT key['payment_id'] AS payment_id,
+       after['status']   AS status,
+       after['amount']   AS amount,
+       lsn
+FROM read_parquet('data/bronze/cdc/payments/**/*.parquet')
+WHERE action <> 'truncate'
+QUALIFY row_number() OVER (PARTITION BY key['payment_id'] ORDER BY lsn_numeric DESC) = 1
+ORDER BY payment_id::BIGINT LIMIT 5;
+```
+
+```
+198 | failed     | 3709.04 | 0/1B08670
+199 | pending    | 473.01  | 0/1B07FD8
+200 | refunded   | 1106.10 | 0/1B08E58
+201 | refunded   | 781.62  | 0/1B0C9C0
+202 | authorized | 1326.28 | 0/1B0D458
+```
+
+Note the ordering column. The LSN is stored twice: `lsn` as the text Postgres prints, and
+`lsn_numeric` as an integer. Sorting the text is wrong — `'0/9FFFFFF'` sorts after
+`'0/10000000'` as a string and before it as a number — and picking the wrong version of a
+row is the kind of bug that only shows up after a few hundred megabytes of WAL. ADR 0013
+has the measurement.
 
 ### Schema contracts
 
@@ -99,6 +148,7 @@ matters most is *rejected alternatives and why*.
 | 0010 | Where the durability boundary sits, and how batches are flushed |
 | 0011 | The contract is checked on the `Relation` message, and what it deliberately skips |
 | 0012 | `TRUNCATE` is recorded as an event, and what that does not yet solve |
+| 0013 | Bronze in Parquet, the tuple as a `MAP`, and the LSN stored twice |
 
 ## Scope
 
