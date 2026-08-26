@@ -81,7 +81,7 @@ def assert_castable(frame, contract: TableContract, column: ColumnContract) -> N
         )
 
 
-def current_rows(frame, contract: TableContract):
+def cleaned_history(frame, contract: TableContract):
     keys = [F.col("key").getItem(name).alias("key_{}".format(name)) for name in contract.key_columns]
     projected = frame.select(
         *keys,
@@ -103,11 +103,7 @@ def current_rows(frame, contract: TableContract):
         source = "raw_{}".format(column.name)
         filled = filled.withColumn(source, F.last(F.col(source), ignorenulls=True).over(carried))
     latest = Window.partitionBy(*key_columns).orderBy(F.col("lsn_numeric").desc())
-    return (
-        filled.withColumn("_rank", F.row_number().over(latest))
-        .where(F.col("_rank") == 1)
-        .drop("_rank")
-    )
+    return filled.withColumn("is_current", F.row_number().over(latest) == F.lit(1))
 
 
 def apply_truncates(rows, truncates):
@@ -117,12 +113,15 @@ def apply_truncates(rows, truncates):
     marker = truncates.where(F.col("lsn_numeric") == boundary["truncate_lsn"]).select("lsn").first()
     return rows.withColumn(
         "truncated_at_lsn",
-        F.when(F.col("lsn_numeric") < F.lit(boundary["truncate_lsn"]), F.lit(marker["lsn"])),
+        F.when(
+            F.col("is_current") & (F.col("lsn_numeric") < F.lit(boundary["truncate_lsn"])),
+            F.lit(marker["lsn"]),
+        ),
     )
 
 
 def build_silver(frame, contract: TableContract, mask):
-    rows = current_rows(frame.where(F.col("action") != "truncate"), contract)
+    rows = cleaned_history(frame.where(F.col("action") != "truncate"), contract)
     for column in contract.columns:
         assert_castable(rows, contract, column)
     silver = apply_truncates(rows, frame.where(F.col("action") == "truncate"))
@@ -135,16 +134,17 @@ def build_silver(frame, contract: TableContract, mask):
             "is_deleted",
             (F.col("action") == "delete") | F.col("truncated_at_lsn").isNotNull(),
         )
-        .withColumnRenamed("lsn", "last_lsn")
-        .withColumnRenamed("lsn_numeric", "last_lsn_numeric")
-        .withColumnRenamed("commit_time", "last_commit_time")
+        .withColumnRenamed("lsn", "change_lsn")
+        .withColumnRenamed("lsn_numeric", "change_lsn_numeric")
+        .withColumnRenamed("commit_time", "change_commit_time")
         .select(
             *[column.name for column in contract.columns],
+            "is_current",
             "is_deleted",
             "truncated_at_lsn",
-            "last_lsn",
-            "last_lsn_numeric",
-            "last_commit_time",
+            "change_lsn",
+            "change_lsn_numeric",
+            "change_commit_time",
         )
     )
 

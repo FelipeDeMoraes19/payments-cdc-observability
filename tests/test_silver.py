@@ -48,6 +48,13 @@ def read_silver(silver_root: Path, table: str) -> list:
     return pq.read_table(silver_root / table).to_pylist()
 
 
+def current_rows(silver_root: Path, table: str) -> dict:
+    key = "{}_id".format(table[:-1])
+    return {
+        row[key]: row for row in read_silver(silver_root, table) if row["is_current"]
+    }
+
+
 @pytest.fixture
 def scenario(postgres, reset_source, drop_slot, request):
     slot = "payments_cdc_silver_{}".format(request.node.name[-12:].replace("[", ""))
@@ -112,16 +119,68 @@ def test_delete_keeps_the_row_and_an_unchanged_toast_column_survives(
     returncode, output = run_spark(bronze, silver)
     assert returncode == 0, output
 
-    merchants = {row["merchant_id"]: row for row in read_silver(silver, "merchants")}
+    merchants = current_rows(silver, "merchants")
     assert merchants[merchant_id]["legal_name"] == long_name
     assert merchants[merchant_id]["category"] == "marketplace"
     assert merchants[merchant_id]["is_deleted"] is False
 
-    customers = {row["customer_id"]: row for row in read_silver(silver, "customers")}
+    customers = current_rows(silver, "customers")
     assert customers[customer_id]["is_deleted"] is True
     assert customers[customer_id]["cpf"] is not None, (
         "the deleted row lost the values it had before it died"
     )
+
+
+def test_silver_keeps_every_version_with_one_marked_current(
+    scenario, run_consumer, read_bronze
+):
+    postgres, slot, bronze, silver = scenario
+    with postgres.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO customers (full_name, email, cpf) "
+            "VALUES ('Versioned', 'v@example.invalid', '00000000002') RETURNING customer_id"
+        )
+        customer_id = cursor.fetchone()[0]
+        cursor.execute(
+            "INSERT INTO merchants (legal_name, category, country) "
+            "VALUES ('Versioned LTDA', 'retail', 'BR') RETURNING merchant_id"
+        )
+        merchant_id = cursor.fetchone()[0]
+        cursor.execute(
+            "INSERT INTO payments (customer_id, merchant_id, amount, currency, status) "
+            "VALUES (%s, %s, 10.00, 'BRL', 'pending') RETURNING payment_id",
+            (customer_id, merchant_id),
+        )
+        payment_id = cursor.fetchone()[0]
+    for status in ("authorized", "captured"):
+        with postgres.cursor() as cursor:
+            cursor.execute(
+                "UPDATE payments SET status = %s, updated_at = now() WHERE payment_id = %s",
+                (status, payment_id),
+            )
+    drain(run_consumer, slot, bronze)
+
+    changes = [
+        event for event in read_bronze(bronze)
+        if event["table_name"] == "payments" and event["key"]["payment_id"] == str(payment_id)
+    ]
+    assert len(changes) == 3, "bronze did not record three changes to prove history with"
+
+    returncode, output = run_spark(bronze, silver)
+    assert returncode == 0, output
+
+    versions = [
+        row for row in read_silver(silver, "payments") if row["payment_id"] == payment_id
+    ]
+    assert len(versions) == 3, "silver collapsed the history instead of keeping it"
+    assert [row["status"] for row in sorted(versions, key=lambda r: r["change_lsn_numeric"])] == [
+        "pending",
+        "authorized",
+        "captured",
+    ]
+    current = [row for row in versions if row["is_current"]]
+    assert len(current) == 1, "exactly one version must be current"
+    assert current[0]["status"] == "captured"
 
 
 def test_truncate_marks_every_earlier_key_as_deleted(scenario, run_consumer, read_bronze):
@@ -144,9 +203,9 @@ def test_truncate_marks_every_earlier_key_as_deleted(scenario, run_consumer, rea
     returncode, output = run_spark(bronze, silver)
     assert returncode == 0, output
 
-    customers = read_silver(silver, "customers")
+    customers = current_rows(silver, "customers")
     assert customers, "the truncate removed the rows instead of marking them"
-    for row in customers:
+    for row in customers.values():
         assert row["is_deleted"] is True
         assert row["truncated_at_lsn"] is not None
 
