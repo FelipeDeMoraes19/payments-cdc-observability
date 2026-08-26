@@ -1,3 +1,4 @@
+import re
 import shutil
 from pathlib import Path
 
@@ -81,7 +82,10 @@ def test_column_type_change_fails_loudly_and_writes_nothing_new(
 
     assert broken.returncode != 0, "the consumer accepted a changed column type"
     assert "contract violation" in message
-    assert "payments.amount" in message
-    assert "numeric" in message and "text" in message
+    assert "public.payments" in message, "the message does not name the table"
+    assert "payments.amount" in message, "the message does not name the column"
+    assert "numeric" in message, "the message does not name the expected type"
+    assert "text" in message, "the message does not name the observed type"
+    assert re.search(r"LSN [0-9A-F]+/[0-9A-F]+", message), "the message does not name the LSN"
 
     assert read_bronze(BRONZE_ROOT) == before, "a record of the new shape reached bronze"

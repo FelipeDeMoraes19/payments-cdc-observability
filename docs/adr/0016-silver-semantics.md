@@ -106,8 +106,15 @@ acaso.
 A mensagem nativa do Spark nomeia o valor e o tipo alvo, mas **não nomeia a coluna** —
 diz `The value 'not-a-timestamp' ... cannot be cast to "TIMESTAMP"` sem dizer onde. Num
 silver com dezenas de colunas isso é uma caça ao tesouro. Por isso a checagem por coluna
-com `try_cast` continua: ela custa uma passada a mais, irrelevante neste volume, e entrega
-a mensagem que o critério de aceite exige.
+com `try_cast` continua: ela entrega a mensagem que o critério de aceite exige.
+
+**E ela custa uma passada a mais, o que só é irrelevante porque este volume é minúsculo.**
+Em escala real a conta muda: uma varredura adicional por coluna tipada, sobre um dataset
+que não cabe em memória, é caro o bastante para a decisão ser outra — amostrar em vez de
+varrer tudo, ou aceitar a mensagem crua do Spark e pagar o custo de diagnóstico só quando
+a falha acontece. Registrar isso é a mesma honestidade do ADR 0015 sobre o Spark estar
+sobredimensionado aqui: a escolha é defensável **neste** contexto, e dizer qual é o
+contexto é parte da escolha.
 
 Nota lateral que vale registrar: o offset de **dois dígitos** do Postgres
 (`+00`), que obrigou um `BeforeValidator` no contrato do Pydantic (ADR 0011), o Spark
