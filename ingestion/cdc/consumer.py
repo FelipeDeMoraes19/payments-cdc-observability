@@ -18,6 +18,7 @@ from ingestion.cdc.pgoutput import (
     Decoder,
     ProtocolError,
     Relation,
+    Truncate,
     format_lsn,
 )
 from ingestion.env import load_env_file, required
@@ -155,6 +156,26 @@ def build_record(change, lsn: int, transaction: Begin) -> dict:
     return record
 
 
+def build_truncate_record(relation, truncate: Truncate, lsn: int, transaction: Begin) -> dict:
+    return {
+        "source": "postgres",
+        "ingested_at": datetime.now(timezone.utc).isoformat(),
+        "lsn": format_lsn(lsn),
+        "xid": transaction.xid,
+        "commit_time": transaction.commit_time.isoformat(),
+        "action": "truncate",
+        "schema": relation.namespace,
+        "table": relation.name,
+        "key": None,
+        "before": None,
+        "after": None,
+        "truncate_options": {
+            "cascade": truncate.cascade,
+            "restart_identity": truncate.restart_identity,
+        },
+    }
+
+
 def _deadline(seconds: float):
     if seconds <= 0:
         return None
@@ -236,6 +257,29 @@ def run(writer: BronzeWriter) -> int:
                     written += _flush(writer, cursor, pending, confirm_lsn)
                     pending = []
                     opened_at = None
+            elif isinstance(decoded, Truncate):
+                if transaction is None:
+                    raise ProtocolError(
+                        "truncate arrived outside a transaction; the stream is out of sync"
+                    )
+                if not pending:
+                    opened_at = datetime.now(timezone.utc)
+                for relation in decoded.relations:
+                    validate_relation(
+                        relation,
+                        contract_for(relation.namespace, relation.name),
+                        format_lsn(message.data_start),
+                    )
+                    pending.append(
+                        PendingRecord(
+                            lsn=message.data_start,
+                            table=relation.name,
+                            partition=transaction.commit_time.date().isoformat(),
+                            payload=build_truncate_record(
+                                relation, decoded, message.data_start, transaction
+                            ),
+                        )
+                    )
             else:
                 if transaction is None:
                     raise ProtocolError(
