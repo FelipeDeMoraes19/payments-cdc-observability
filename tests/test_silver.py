@@ -8,6 +8,8 @@ import pytest
 
 from ingestion.cdc.bronze import BronzeWriter, PendingRecord
 
+pytestmark = pytest.mark.e2e
+
 ROOT = Path(__file__).resolve().parents[1]
 SPARK_TIMEOUT_SECONDS = 600
 

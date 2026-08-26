@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 ROOT = Path(__file__).resolve().parents[1]
 BRONZE_ROOT = ROOT / "data" / "test-bronze" / "restart"
 SLOT = "payments_cdc_restart_test"
