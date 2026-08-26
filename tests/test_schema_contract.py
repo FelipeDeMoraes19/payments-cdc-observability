@@ -64,12 +64,12 @@ def test_registered_type_oids_match_the_server(source):
 
 
 def test_column_type_change_fails_loudly_and_writes_nothing_new(
-    source, run_consumer, read_jsonl
+    source, run_consumer, read_bronze
 ):
     seed_payment(source, "199.90")
     healthy = run_consumer(SLOT, BRONZE_ROOT)
     assert healthy.returncode == 0, healthy.stderr.decode("utf-8", "replace")
-    before = read_jsonl(BRONZE_ROOT)
+    before = read_bronze(BRONZE_ROOT)
     assert before, "nothing was captured before the schema changed"
 
     with source.cursor() as cursor:
@@ -84,4 +84,4 @@ def test_column_type_change_fails_loudly_and_writes_nothing_new(
     assert "payments.amount" in message
     assert "numeric" in message and "text" in message
 
-    assert read_jsonl(BRONZE_ROOT) == before, "a record of the new shape reached bronze"
+    assert read_bronze(BRONZE_ROOT) == before, "a record of the new shape reached bronze"

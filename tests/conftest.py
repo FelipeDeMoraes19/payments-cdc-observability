@@ -1,4 +1,3 @@
-import json
 import os
 import subprocess
 import sys
@@ -7,6 +6,7 @@ from pathlib import Path
 import psycopg2
 import pytest
 
+from ingestion.cdc import bronze
 from ingestion.env import load_env_file
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,13 +94,5 @@ def run_consumer(consumer_env):
 
 
 @pytest.fixture
-def read_jsonl():
-    def read(root) -> list:
-        records = []
-        for path in sorted(Path(root).rglob("*.jsonl")):
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if line:
-                    records.append(json.loads(line))
-        return records
-
-    return read
+def read_bronze():
+    return bronze.read

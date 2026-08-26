@@ -28,11 +28,12 @@ def event_of(record: dict) -> str:
     return json.dumps(
         {name: value for name, value in record.items() if name != "ingested_at"},
         sort_keys=True,
+        default=str,
     )
 
 
 def identity_of(record: dict) -> tuple:
-    return (record["table"], json.dumps(record["key"], sort_keys=True), record["lsn"])
+    return (record["table_name"], json.dumps(record["key"], sort_keys=True), record["lsn"])
 
 
 def source_payment_ids(connection) -> set:
@@ -67,7 +68,7 @@ def seed_changes(connection, payment_count: int) -> None:
             )
 
 
-def test_consumer_restart_loses_nothing(source, consumer_env, read_jsonl):
+def test_consumer_restart_loses_nothing(source, consumer_env, read_bronze):
     generator = subprocess.Popen(
         [sys.executable, "-m", "generator.synthetic_load"],
         cwd=str(ROOT),
@@ -104,13 +105,13 @@ def test_consumer_restart_loses_nothing(source, consumer_env, read_jsonl):
     )
     assert survivor.returncode == 0, survivor.stderr.decode("utf-8", "replace")
 
-    records = read_jsonl(BRONZE_ROOT)
+    records = read_bronze(BRONZE_ROOT)
     assert records, "no records reached bronze"
 
     inserted = {
         record["key"]["payment_id"]
         for record in records
-        if record["table"] == "payments" and record["action"] == "insert"
+        if record["table_name"] == "payments" and record["action"] == "insert"
     }
     assert inserted == source_payment_ids(source)
 
@@ -124,7 +125,7 @@ def test_consumer_restart_loses_nothing(source, consumer_env, read_jsonl):
 
 
 def test_records_written_but_never_confirmed_are_replayed_identically(
-    source, run_consumer, read_jsonl
+    source, run_consumer, read_bronze
 ):
     seed_changes(source, payment_count=12)
 
@@ -136,14 +137,14 @@ def test_records_written_but_never_confirmed_are_replayed_identically(
         CDC_FAIL_BEFORE_FEEDBACK=1,
     )
     assert crashing.returncode == 17, crashing.stderr.decode("utf-8", "replace")
-    assert read_jsonl(BRONZE_ROOT), "the injected failure fired before anything was written"
+    assert read_bronze(BRONZE_ROOT), "the injected failure fired before anything was written"
 
     survivor = run_consumer(
         SLOT, BRONZE_ROOT, CDC_BATCH_MAX_RECORDS=3, CDC_BATCH_MAX_SECONDS=30
     )
     assert survivor.returncode == 0, survivor.stderr.decode("utf-8", "replace")
 
-    records = read_jsonl(BRONZE_ROOT)
+    records = read_bronze(BRONZE_ROOT)
     grouped = defaultdict(set)
     for record in records:
         grouped[identity_of(record)].add(event_of(record))
@@ -158,5 +159,5 @@ def test_records_written_but_never_confirmed_are_replayed_identically(
     assert {
         record["key"]["payment_id"]
         for record in records
-        if record["table"] == "payments" and record["action"] == "insert"
+        if record["table_name"] == "payments" and record["action"] == "insert"
     } == source_payment_ids(source)

@@ -39,7 +39,7 @@ def truncate_records(records: list) -> list:
     return [record for record in records if record["action"] == "truncate"]
 
 
-def test_truncate_becomes_one_event_per_table(source, run_consumer, read_jsonl):
+def test_truncate_becomes_one_event_per_table(source, run_consumer, read_bronze):
     seed_one_of_each(source)
     with source.cursor() as cursor:
         cursor.execute("TRUNCATE payments, customers, merchants RESTART IDENTITY")
@@ -47,18 +47,19 @@ def test_truncate_becomes_one_event_per_table(source, run_consumer, read_jsonl):
     result = run_consumer(SLOT, BRONZE_ROOT)
     assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
 
-    events = truncate_records(read_jsonl(BRONZE_ROOT))
-    assert {event["table"] for event in events} == {"payments", "customers", "merchants"}
+    events = truncate_records(read_bronze(BRONZE_ROOT))
+    assert {event["table_name"] for event in events} == {"payments", "customers", "merchants"}
     assert len({event["lsn"] for event in events}) == 1
     for event in events:
         assert event["key"] is None
         assert event["before"] is None
         assert event["after"] is None
-        assert event["truncate_options"] == {"cascade": False, "restart_identity": True}
+        assert event["truncate_cascade"] is False
+        assert event["truncate_restart_identity"] is True
 
 
 def test_truncate_is_decoded_without_a_prior_change_to_the_table(
-    source, run_consumer, read_jsonl
+    source, run_consumer, read_bronze
 ):
     with source.cursor() as cursor:
         cursor.execute("TRUNCATE payments")
@@ -66,6 +67,7 @@ def test_truncate_is_decoded_without_a_prior_change_to_the_table(
     result = run_consumer(SLOT, BRONZE_ROOT)
     assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
 
-    events = truncate_records(read_jsonl(BRONZE_ROOT))
-    assert [event["table"] for event in events] == ["payments"]
-    assert events[0]["truncate_options"] == {"cascade": False, "restart_identity": False}
+    events = truncate_records(read_bronze(BRONZE_ROOT))
+    assert [event["table_name"] for event in events] == ["payments"]
+    assert events[0]["truncate_cascade"] is False
+    assert events[0]["truncate_restart_identity"] is False
