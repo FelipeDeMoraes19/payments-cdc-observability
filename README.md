@@ -2,6 +2,9 @@
 
 A data platform that fits in a `docker compose up` and hides none of the boring parts.
 
+**[Browse the data model, its lineage and its tests](https://felipedemoraes19.github.io/payments-cdc-observability/)** — the
+`dbt docs` site, served straight from this repository. Nothing to clone or run.
+
 > **Status:** Milestone 1 is complete and the silver layer of Milestone 2 is built. Both
 > sources land in bronze with schema contracts enforced at the boundary, and Spark turns
 > the change log into a typed, masked silver. The dimensional model in dbt and the Airflow
@@ -227,6 +230,27 @@ history needs to know when a row died, and an absent row has no date of death.
 
 Spark runs inside a container on Java 21. Nothing about it is installed on the host, and
 that is deliberate — ADR 0015 has the measurements.
+
+### Gold
+
+```
+make gold
+make docs
+```
+
+`make gold` builds the dimensional model into a DuckDB file with dbt and runs its tests.
+`make docs` regenerates the lineage site linked at the top of this file.
+
+`dim_customer` is a Type 2 dimension built **from the change log**, not from periodic
+snapshots, so every version a customer ever had is there with the interval it was really
+valid for. `fct_payment` joins to the customer version that was valid *when the payment
+happened*, which is the entire reason the dimension keeps history. ADR 0017 explains why
+`dbt snapshot` was rejected, and is careful to reject it for a reason that survives
+reading dbt's own macros.
+
+`amount_brl` comes from crossing the payment with the PTAX rate published for its day. It
+is deliberately nullable: a day with no published rate leaves it empty rather than
+guessing, which is what a `not_null` test can then catch.
 
 ### Schema contracts
 

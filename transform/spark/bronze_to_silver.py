@@ -92,6 +92,7 @@ def cleaned_history(frame, contract: TableContract):
         F.col("action"),
         F.col("lsn"),
         F.col("lsn_numeric"),
+        F.col("xid"),
         F.col("commit_time"),
     )
     key_columns = ["key_{}".format(name) for name in contract.key_columns]
@@ -136,6 +137,7 @@ def build_silver(frame, contract: TableContract, mask):
         )
         .withColumnRenamed("lsn", "change_lsn")
         .withColumnRenamed("lsn_numeric", "change_lsn_numeric")
+        .withColumnRenamed("xid", "change_xid")
         .withColumnRenamed("commit_time", "change_commit_time")
         .select(
             *[column.name for column in contract.columns],
@@ -144,6 +146,7 @@ def build_silver(frame, contract: TableContract, mask):
             "truncated_at_lsn",
             "change_lsn",
             "change_lsn_numeric",
+            "change_xid",
             "change_commit_time",
         )
     )

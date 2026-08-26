@@ -1,4 +1,4 @@
-.PHONY: up down reset seed cdc fx spark-build silver spark-shell test test-e2e test-all slots
+.PHONY: up down reset seed cdc fx spark-build silver spark-shell gold docs test test-e2e test-all slots
 
 up:
 	docker compose up -d
@@ -27,6 +27,15 @@ silver:
 
 spark-shell:
 	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm spark /opt/spark/bin/pyspark --master 'local[*]'
+
+gold:
+	cd transform/dbt && DBT_PROFILES_DIR=. dbt build
+
+docs:
+	cd transform/dbt && DBT_PROFILES_DIR=. dbt docs generate
+	cp transform/dbt/target/index.html docs/index.html
+	cp transform/dbt/target/manifest.json docs/manifest.json
+	cp transform/dbt/target/catalog.json docs/catalog.json
 
 test:
 	python -m pytest -m 'not e2e' -v

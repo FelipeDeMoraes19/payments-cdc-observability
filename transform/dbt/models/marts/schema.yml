@@ -1,0 +1,112 @@
+version: 2
+
+models:
+  - name: dim_customer
+    description: >
+      Slowly changing dimension, type 2, built from the change log rather than from
+      periodic snapshots. Every version a customer ever had is here with the interval it
+      was valid for, taken from the commit time of the change that created it. See ADR
+      0017 for why dbt snapshot was rejected.
+    columns:
+      - name: customer_sk
+        description: Surrogate key, one per version. Derived from the natural key and the LSN, so it is stable across runs.
+        data_tests: [unique, not_null]
+      - name: customer_id
+        description: Natural key from the source system. Repeats across versions.
+        data_tests: [not_null]
+      - name: cpf
+        description: HMAC-SHA256 digest under a key that never enters the repository. Never the CPF itself. See ADR 0005.
+        data_tests: [not_null]
+      - name: email
+        description: Masked the same way as cpf.
+      - name: valid_from
+        description: Commit time of the change that created this version.
+        data_tests: [not_null]
+      - name: valid_to
+        description: Commit time of the next version, or null while this one is current.
+      - name: is_current
+        description: True for the version that survived last. Exactly one per customer.
+        data_tests: [not_null]
+      - name: is_deleted
+        description: True when the change that created this version was a delete or a truncate.
+
+  - name: dim_merchant
+    description: Slowly changing dimension, type 1. Only the current version is kept.
+    columns:
+      - name: merchant_sk
+        data_tests: [unique, not_null]
+      - name: merchant_id
+        data_tests: [unique, not_null]
+      - name: country
+        data_tests: [not_null]
+
+  - name: dim_currency
+    description: One row per currency seen in payments or in the exchange rate feed.
+    columns:
+      - name: currency_sk
+        data_tests: [unique, not_null]
+      - name: currency
+        data_tests: [unique, not_null]
+
+  - name: dim_date
+    description: >
+      Every day between the first and the last date observed in the data. Generated from
+      the data itself so that a rerun cannot produce a different calendar.
+    columns:
+      - name: date_sk
+        data_tests: [unique, not_null]
+      - name: date_day
+        data_tests: [unique, not_null]
+
+  - name: fct_payment
+    description: >
+      One row per payment, at its current version. Joined to the customer version that was
+      valid at the moment the payment was created, which is the reason the dimension keeps
+      history.
+    columns:
+      - name: payment_sk
+        description: Surrogate key derived from the natural key.
+        data_tests: [unique, not_null]
+      - name: customer_sk
+        description: The customer version valid when the payment happened, not the version valid now.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_sk
+      - name: merchant_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_merchant')
+                field: merchant_sk
+      - name: date_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_sk
+      - name: currency_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_currency')
+                field: currency_sk
+      - name: amount_original
+        description: The amount as the source recorded it, in the payment's own currency.
+        data_tests: [not_null]
+      - name: amount_brl
+        description: >
+          amount_original converted with the PTAX sell rate published for the day of the
+          payment. Null when no rate exists for that day, which is what makes a missing
+          exchange rate visible instead of silent.
+      - name: status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["pending", "authorized", "captured", "refunded", "failed"]

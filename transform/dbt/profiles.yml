@@ -1,0 +1,7 @@
+payments:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('GOLD_DB', '../../data/gold/payments.duckdb') }}"
+      threads: 4

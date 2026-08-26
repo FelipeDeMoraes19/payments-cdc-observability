@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: silver
+    description: >
+      Cleaned change log written by the Spark job. One row per change, not per key,
+      with is_current marking the version that survived last.
+    meta:
+      external_location: "{{ env_var('SILVER_ROOT', '../../data/silver') }}/{name}/*.parquet"
+    tables:
+      - name: customers
+      - name: merchants
+      - name: payments
+
+  - name: bronze
+    description: Exchange rates land already typed, so gold reads them from bronze.
+    meta:
+      external_location: "{{ env_var('FX_BRONZE_ROOT', '../../data/bronze/fx') }}/**/*.parquet"
+    tables:
+      - name: fx
