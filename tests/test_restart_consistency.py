@@ -69,6 +69,19 @@ def seed_changes(connection, payment_count: int) -> None:
 
 
 def test_consumer_restart_loses_nothing(source, consumer_env, read_bronze):
+    """Kill the consumer mid-stream and prove the bronze still matches the source.
+
+    Popen.kill() is TerminateProcess on Windows, not a literal SIGKILL: Windows
+    has no POSIX signals. It is the closest equivalent, immediate and impossible
+    for the process to catch or handle, which is what this test needs. On a POSIX
+    host the same call sends SIGKILL.
+
+    This test proves the first half of the milestone criterion, that nothing is
+    lost. The second half, that every duplicate is byte identical as an event, is
+    proved by the injected failure test below: the window between the durable
+    write and the confirmation is microseconds wide, so a kill at an arbitrary
+    moment practically never lands in it and produces no duplicates at all.
+    """
     generator = subprocess.Popen(
         [sys.executable, "-m", "generator.synthetic_load"],
         cwd=str(ROOT),
