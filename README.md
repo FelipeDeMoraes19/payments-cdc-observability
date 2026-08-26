@@ -2,9 +2,10 @@
 
 A data platform that fits in a `docker compose up` and hides none of the boring parts.
 
-> **Status: work in progress.** Milestone 1 of 3 (ingestion and schema contracts) is under
-> construction. This README grows with the project; sections marked *planned* are not built
-> yet.
+> **Status:** Milestone 1 of 3 is complete — both sources land in bronze, with schema
+> contracts enforced at the boundary and both acceptance criteria proved by tests.
+> Milestone 2 (silver, dimensional model, orchestration) is next. This README grows with
+> the project; rows and sections marked *planned* are not built yet.
 
 Most portfolio data projects prove the happy path: call an API, load, transform, show a
 dashboard. This one is about the parts that production demands and portfolios skip —
@@ -19,9 +20,28 @@ capture is the risky part, so it was built first.
 
 ## Failure modes
 
-*Planned — the table lands with Milestone 3.* Every row will name the command that injects
-the failure, what should catch it, and whether it actually does. Including the row that
-says "no, and here is exactly why".
+The table every row of which names how the failure is injected, what is supposed to catch
+it, and whether it actually does. Rows that are already true cite the test that proves
+them; the rest are marked *planned* and are not claims yet.
+
+| Failure mode | Injected by | Should be caught by | Caught? |
+|---|---|---|---|
+| A record written but never confirmed is replayed | `CDC_FAIL_BEFORE_FEEDBACK=1` kills the consumer between the write and the confirm | deduplication on `(key, lsn)`; replayed copies must carry an identical event | **Yes** — `tests/test_restart_consistency.py` |
+| The consumer dies mid-stream | `SIGKILL` while the generator is running | the slot resumes from the last confirmed LSN, so nothing is lost | **Yes** — `tests/test_restart_consistency.py` |
+| A column changes type at the source | `ALTER TABLE payments ALTER COLUMN amount TYPE text` | the contract checked against the `Relation` message, before any row of the new shape is written | **Yes** — `tests/test_schema_contract.py` |
+| A published table has no contract | adding a table to the publication without declaring it | the same contract check, which refuses to ingest what nobody declared | **Yes** — `contracts/validation.py` |
+| A source table is truncated | `TRUNCATE` on a published table | recorded as an event in bronze with its LSN | **Partly** — the event is recorded but not yet applied; silver must interpret it (ADR 0012) |
+| A replication slot is left without a consumer | `make chaos-orphan-slot` | a Grafana alert on the WAL the slot retains | *Planned, Milestone 3* |
+| Data arrives late | `make chaos-late` | a dbt freshness test | *Planned, Milestone 3* |
+| A day of exchange rates is missing | `make chaos-fx-gap` | a `not_null` test on `amount_brl` | *Planned, Milestone 3* |
+| PII reaches the gold layer | `make chaos-pii` | a custom test for CPF patterns in gold | *Planned, Milestone 3* |
+| Nothing is being ingested at all | `make chaos-empty` | a heartbeat alert in Grafana | *Planned, Milestone 3* |
+| **A blind alert** | `make chaos-blind` | **nothing — the alert cannot fire** | *Planned, Milestone 3* — **and it will stay "no", on purpose** |
+
+The last row is the point of the exercise, and it is written down before it exists: an
+alert whose threshold the metric can never reach. It stays in the repository, documented,
+because "we do not detect this, and here is exactly why" is a sentence most systems need
+and few say out loud.
 
 ## Architecture
 
