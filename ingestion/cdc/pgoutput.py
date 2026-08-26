@@ -12,7 +12,10 @@ REPLICA_IDENTITY_NAMES = {
     "i": "index",
 }
 
-SUPPORTED_MESSAGE_TYPES = "B, C, R, I, U, D"
+SUPPORTED_MESSAGE_TYPES = "B, C, R, I, U, D, T"
+
+TRUNCATE_CASCADE = 1
+TRUNCATE_RESTART_IDENTITY = 2
 
 
 class ProtocolError(Exception):
@@ -64,6 +67,13 @@ class Commit:
     commit_lsn: int
     end_lsn: int
     commit_time: datetime
+
+
+@dataclass(frozen=True)
+class Truncate:
+    relations: Tuple[Relation, ...]
+    cascade: bool
+    restart_identity: bool
 
 
 @dataclass(frozen=True)
@@ -157,6 +167,8 @@ class Decoder:
             return self._update(reader)
         if tag == "D":
             return self._delete(reader)
+        if tag == "T":
+            return self._truncate(reader)
         raise ProtocolError(
             "unsupported pgoutput message type {!r}; this consumer handles {}".format(
                 tag, SUPPORTED_MESSAGE_TYPES
@@ -228,6 +240,18 @@ class Decoder:
             )
         new_values, unchanged = _read_tuple(reader, relation)
         return Change("update", relation, new_values, old_values, unchanged)
+
+    def _truncate(self, reader: _Reader) -> Truncate:
+        relation_count = reader.int32()
+        options = reader.uint8()
+        relations = []
+        for _ in range(relation_count):
+            relations.append(self.relation_for(reader.uint32()))
+        return Truncate(
+            tuple(relations),
+            bool(options & TRUNCATE_CASCADE),
+            bool(options & TRUNCATE_RESTART_IDENTITY),
+        )
 
     def _delete(self, reader: _Reader) -> Change:
         relation = self.relation_for(reader.uint32())
