@@ -27,8 +27,8 @@ antes de escolher a versão vigente.
 **Tipagem vem do contrato**, o mesmo `contracts/tables.py` que a ingestão usa. Não existe
 segunda declaração do schema.
 
-**Idempotência por `partitionOverwriteMode = dynamic`**: reprocessar uma partição
-substitui exatamente aquela partição.
+**Idempotência por sobrescrita total** de cada tabela do silver. Mesma entrada, mesma
+saída, sem estado sobrevivente entre execuções.
 
 **Parse inválido falha alto, com a coluna nomeada.** O modo ANSI fica **fixado
 explicitamente** na sessão, e antes de tipar qualquer coluna o job verifica, por coluna,
@@ -60,6 +60,28 @@ acontecesse (ADR 0001); ignorá-lo desperdiçaria a informação já capturada.
 uma linha ausente não tem data de morte. E um `delete` seguido de reinserção da mesma
 chave ficaria indistinguível de um registro que nunca sumiu.
 
+**`partitionOverwriteMode = dynamic`.** Foi a decisão original deste ADR, e estava errada.
+Vale registrar o princípio e não só o conserto:
+
+> **Sobrescrita dinâmica só é idempotente quando a partição é estável para a chave.**
+
+O silver é um *snapshot* — uma linha por chave, com o estado vigente. Se a partição for a
+data de commit da última mudança, então a partição de uma chave **muda exatamente quando a
+chave muda**. A sobrescrita dinâmica não toca partição que não veio no lote, então a versão
+velha continua viva na partição antiga e a chave passa a existir duas vezes. O layout
+desfaz a deduplicação que o job acabou de fazer, e o critério de aceite do Marco 2 —
+rodar duas vezes e obter o mesmo resultado — quebra sem que nada na origem tenha mudado.
+
+Sobrescrita dinâmica é a ferramenta certa para tabela de **eventos**, onde a partição é o
+tempo do evento e nunca se move. Errada para tabela de **estado**.
+
+**Formato de tabela com `MERGE`** — Delta, Iceberg ou Hudi. É o que a resposta em escala
+seria: fazer *upsert* por chave em vez de reescrever tudo, com a partição deixando de ser o
+mecanismo de idempotência. Fica fora **por decisão de escopo, não por desconhecimento**: o
+plano proíbe infraestrutura acessória (seção 2), e num volume de milhares de linhas a
+sobrescrita total custa menos que a complexidade de manter um formato transacional. Em
+volume real a conta inverte, e a decisão inverte junto.
+
 **Interpretar `truncate` no gold em vez do silver.** O evento de truncate não tem chave
 (ADR 0012), então quem o aplica precisa conhecer o LSN e a tabela para invalidar tudo o que
 veio antes. Esse é raciocínio de linhagem de mudanças, que é o trabalho do silver.
@@ -75,8 +97,8 @@ veio antes. Esse é raciocínio de linhagem de mudanças, que é o trabalho do s
   como texto, `0/9FFFFFF` ordena depois de `0/10000000` e a versão vigente sai errada.
 - O contrato vira dependência de execução do job, e não só da ingestão. Mudar uma coluna
   passa a exigir tocar um lugar só, que é o ponto.
-- `partitionOverwriteMode = dynamic` só é idempotente se a partição for função determinística
-  do dado. Aqui é: a data de commit do evento.
+- Sobrescrita total significa reescrever o silver inteiro a cada execução. Neste volume é
+  irrelevante; ver abaixo o que mudaria em escala.
 
 ## Evidência: o Spark 4.2.0 já falha alto, e mesmo assim a checagem fica
 
@@ -119,3 +141,21 @@ contexto é parte da escolha.
 Nota lateral que vale registrar: o offset de **dois dígitos** do Postgres
 (`+00`), que obrigou um `BeforeValidator` no contrato do Pydantic (ADR 0011), o Spark
 parseia sem ajuste nenhum. Dois parsers, duas tolerâncias diferentes para o mesmo dado.
+
+## Nota: o HMAC roda em UDF Python, sem otimização Arrow
+
+O mascaramento do ADR 0005 é HMAC-SHA256, e o Spark não tem função nativa de HMAC — só
+`sha2`, `md5` e afins. Construir HMAC à mão em SQL, com `opad` e `ipad`, seria possível e
+ilegível; a escolha é uma UDF Python, seguindo "legibilidade vence esperteza".
+
+A UDF cai no **caminho não otimizado por Arrow**, e o Spark avisa: `Arrow optimization
+failed to enable because PyArrow or Pandas is not installed`. Isso significa serialização
+linha a linha entre a JVM e o Python, que é a parte cara de uma UDF.
+
+`pyarrow` **não** entra na imagem por causa disso. A imagem instala o que o job importa e
+nada mais (ADR 0015), e adicionar dependência para uma otimização que este volume não
+precisa contraria a mesma disciplina. Em escala a decisão seria outra, e há dois caminhos:
+instalar `pyarrow` e usar UDF vetorizada, que reduz o custo de serialização mas mantém o
+Python no caminho; ou implementar o HMAC como expressão nativa e nunca sair da JVM, que é
+mais rápido e mais difícil de ler. Qual dos dois depende de quanto o perfil de execução
+mostrar que a UDF pesa — e neste projeto ela não pesa nada.
