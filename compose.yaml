@@ -1,0 +1,35 @@
+name: payments-cdc
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: payments-oltp
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+      - -c
+      - wal_sender_timeout=60s
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-payments}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payments}
+      POSTGRES_DB: ${POSTGRES_DB:-payments}
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-payments} -d ${POSTGRES_DB:-payments}
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
