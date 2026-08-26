@@ -11,11 +11,20 @@ entregar **uma linha por chave**, tipada e mascarada, sem perder o que o log sab
 
 ## Decisão
 
-**Versão vigente por `row_number()` sobre janela.**
+**O silver guarda o histórico limpo completo**, uma linha por `(chave, lsn)`, com a versão
+vigente marcada por `is_current`:
 
 ```
-row_number() over (partition by key order by lsn_numeric desc) = 1
+is_current = row_number() over (partition by key order by lsn_numeric desc) = 1
 ```
+
+> **Emenda de 2026-08-26.** A decisão original era "uma linha por chave", colapsando o
+> histórico aqui. Estava errada, e o erro é de camada. A deduplicação que o silver deve
+> fazer é a de **replay**, por `(pk, lsn)` — a mesma mudança entregue duas vezes. Colapsar
+> versões distintas de uma chave não é limpeza, é **modelagem**, e modelagem é trabalho do
+> gold, onde se decide entre SCD1 e SCD2. Um silver que já colapsou destrói a informação de
+> que o SCD2 precisa, e o ADR 0017 mostra que reconstruí-la depois é impossível.
+> A limpeza fica aqui; a escolha de forma fica no gold.
 
 **Coluna TOAST não alterada é preenchida com o último valor conhecido**, via
 `last_value(coluna, ignoreNulls = true)` sobre a mesma janela ordenada por LSN crescente,
@@ -88,8 +97,9 @@ veio antes. Esse é raciocínio de linhagem de mudanças, que é o trabalho do s
 
 ## Consequências
 
-- Uma linha vigente por chave, sempre, mesmo que ela esteja morta. Quem consome escolhe se
-  filtra `is_deleted`.
+- Toda versão de toda chave, sempre, inclusive as mortas. Quem quer o estado vigente
+  filtra `is_current`; quem quer história tem ela inteira. Filtrar é responsabilidade de
+  quem consome, e o nome da coluna existe para que esquecer disso seja difícil.
 - `truncate` invalida por comparação de LSN: toda chave da tabela cuja última mudança tem
   LSN **anterior** ao do truncate passa a `is_deleted`. Isso fecha a dívida que o ADR 0012
   deixou explicitamente em aberto.
@@ -99,6 +109,16 @@ veio antes. Esse é raciocínio de linhagem de mudanças, que é o trabalho do s
   passa a exigir tocar um lugar só, que é o ponto.
 - Sobrescrita total significa reescrever o silver inteiro a cada execução. Neste volume é
   irrelevante; ver abaixo o que mudaria em escala.
+- **O silver deixa de ser limitado pelo número de chaves e passa a crescer com o número de
+  mudanças.** Uma linha que muda mil vezes ocupa mil linhas. Aqui é irrelevante, e é
+  exatamente o tipo de coisa que morde em escala: o custo passa a acompanhar a taxa de
+  alteração da origem, não o tamanho dela.
+- **A sobrescrita total agora significa reprocessar todo o histórico a cada execução.**
+  Continua idempotente e continua barato neste volume. Em escala a resposta seria
+  **incremental por intervalo de LSN** — processar apenas o que chegou desde o último
+  corte, anexando ao histórico já escrito. Não é feito aqui por escolha consciente: o
+  incremental troca uma releitura barata por estado de controle entre execuções, que é
+  precisamente o que o ADR 0008 evita enquanto puder.
 
 ## Evidência: o Spark 4.2.0 já falha alto, e mesmo assim a checagem fica
 
