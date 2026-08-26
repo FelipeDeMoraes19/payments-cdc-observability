@@ -2,10 +2,11 @@
 
 A data platform that fits in a `docker compose up` and hides none of the boring parts.
 
-> **Status:** Milestone 1 of 3 is complete — both sources land in bronze, with schema
-> contracts enforced at the boundary and both acceptance criteria proved by tests.
-> Milestone 2 (silver, dimensional model, orchestration) is next. This README grows with
-> the project; rows and sections marked *planned* are not built yet.
+> **Status:** Milestone 1 is complete and the silver layer of Milestone 2 is built. Both
+> sources land in bronze with schema contracts enforced at the boundary, and Spark turns
+> the change log into a typed, masked silver. The dimensional model in dbt and the Airflow
+> orchestration are next. This README grows with the project; rows and sections marked
+> *planned* are not built yet.
 
 Most portfolio data projects prove the happy path: call an API, load, transform, show a
 dashboard. This one is about the parts that production demands and portfolios skip —
@@ -30,7 +31,10 @@ them; the rest are marked *planned* and are not claims yet.
 | The consumer dies mid-stream | `SIGKILL` while the generator is running | the slot resumes from the last confirmed LSN, so nothing is lost | **Yes** — `tests/test_restart_consistency.py` |
 | A column changes type at the source | `ALTER TABLE payments ALTER COLUMN amount TYPE text` | the contract checked against the `Relation` message, before any row of the new shape is written | **Yes** — `tests/test_schema_contract.py` |
 | A published table has no contract | adding a table to the publication without declaring it | the same contract check, which refuses to ingest what nobody declared | **Yes** — `contracts/validation.py` |
-| A source table is truncated | `TRUNCATE` on a published table | recorded as an event in bronze with its LSN | **Partly** — the event is recorded but not yet applied; silver must interpret it (ADR 0012) |
+| A source table is truncated | `TRUNCATE` on a published table | recorded as an event in bronze, then applied in silver: every key whose last change predates it is marked deleted | **Yes** — `tests/test_silver.py` |
+| A row is deleted at the source | `DELETE` on a published table | silver keeps the row with its last known values and marks `is_deleted`, so the date of death survives | **Yes** — `tests/test_silver.py` |
+| An unchanged TOASTed column arrives absent | an `UPDATE` touching only another column of a row with a large value | the marker recorded in bronze, and the last known value carried forward in silver | **Yes** — `tests/test_silver.py` |
+| A value in bronze cannot be typed | a bronze file written outside the ingestion path | silver refuses to run, naming the column, the observed value and the expected type | **Yes** — `tests/test_silver.py` |
 | A replication slot is left without a consumer | `make chaos-orphan-slot` | a Grafana alert on the WAL the slot retains | *Planned, Milestone 3* |
 | Data arrives late | `make chaos-late` | a dbt freshness test | *Planned, Milestone 3* |
 | A day of exchange rates is missing | `make chaos-fx-gap` | a `not_null` test on `amount_brl` | *Planned, Milestone 3* |
@@ -45,7 +49,30 @@ and few say out loud.
 
 ## Architecture
 
-*Planned — diagram lands with Milestone 2.*
+```
+ postgres (wal_level=logical)                    BCB SGS API
+   payments, customers, merchants                daily PTAX rates
+         |                                             |
+         | logical replication, pgoutput               | incremental batch
+         | decoded by this repository                  | watermark from the data
+         v                                             v
+   bronze/cdc/<table>/dt=<commit date>/        bronze/fx/<currency>/month=<YYYY-MM>/
+         the raw change log, values as text     typed observations
+                        |
+                        | PySpark, in a container
+                        | dedup by (key, lsn), TOAST carried forward,
+                        | typing from the contract, PII masked with HMAC
+                        v
+                    silver/<table>          one row per key, is_deleted kept
+                        |
+                        v
+                    gold                    planned: fct_payment and the dimensions
+                                            in dbt, dim_customer as SCD2
+```
+
+Everything above the `gold` line exists and is covered by tests. Schema contracts sit at
+the bronze boundary and again before typing in silver, so a change at the source stops the
+pipeline instead of quietly reshaping the data.
 
 ## Requirements
 
@@ -183,6 +210,24 @@ window instead.
 Days with no quote are simply absent: weekends and holidays have no PTAX. That gap is
 real, and later it is what a missing `amount_brl` will be traced back to.
 
+### Silver
+
+```
+make spark-build
+make silver
+```
+
+Spark reads the change log and writes one row per key into `data/silver/<table>`: current
+version chosen by the highest LSN, unchanged TOASTed columns carried forward from the last
+version that had them, values typed from the same contract the ingestion uses, and CPF and
+e-mail replaced by an HMAC digest under a key that never enters the repository.
+
+Rows that were deleted or truncated stay, marked `is_deleted`. A dimension that tracks
+history needs to know when a row died, and an absent row has no date of death.
+
+Spark runs inside a container on Java 21. Nothing about it is installed on the host, and
+that is deliberate — ADR 0015 has the measurements.
+
 ### Schema contracts
 
 Every published table is declared in `contracts/`: its columns, their Postgres types, and
@@ -222,6 +267,7 @@ matters most is *rejected alternatives and why*.
 |---|---|
 | 0001 | Own CDC consumer reading `pgoutput`, instead of Debezium, Airbyte or `wal2json` |
 | 0002 | Deduplication keyed on per-message LSN, not commit LSN and not `updated_at` |
+| 0005 | PII masked in silver with HMAC under a managed key, and why that is pseudonymisation |
 | 0008 | State lives in the replication slot and in the data, never in a side file |
 | 0009 | Dedicated replication role, and where its password lives |
 | 0010 | Where the durability boundary sits, and how batches are flushed |
@@ -229,6 +275,8 @@ matters most is *rejected alternatives and why*.
 | 0012 | `TRUNCATE` is recorded as an event, and what that does not yet solve |
 | 0013 | Bronze in Parquet, the tuple as a `MAP`, and the LSN stored twice |
 | 0014 | The BCB extractor: SGS series, monthly windows, watermark in the data |
+| 0015 | Spark runs in a container, and why Spark is here at all |
+| 0016 | Silver semantics: one row per key, and what happens to what died |
 
 ## Scope
 
