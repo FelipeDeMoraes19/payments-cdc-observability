@@ -55,6 +55,24 @@ on.
 Postgres is published on **port 5434**, not 5432, to avoid colliding with an existing
 local instance.
 
+### Schema contracts
+
+Every published table is declared in `contracts/`: its columns, their Postgres types, and
+a Pydantic model for the values. The declaration is checked against the `Relation` message
+that `pgoutput` sends ahead of any row, so a type change in the source is caught before a
+single record of the new shape is written:
+
+```
+contract violation: column public.payments.amount changed type at LSN 0/1AD3C68:
+the contract expects numeric (oid 1700), the stream carries text (oid 25)
+```
+
+The consumer exits with status 2 and confirms nothing, so the changes still in flight are
+replayed once the contract and the source agree again.
+
+A table that is published without a contract is also a violation. Publishing without
+contracting is how data nobody can explain gets into a warehouse.
+
 ### Changing the database schema
 
 The scripts in `db/init/` run **only when the Postgres volume is empty**. Editing them and
@@ -78,6 +96,8 @@ matters most is *rejected alternatives and why*.
 | 0002 | Deduplication keyed on per-message LSN, not commit LSN and not `updated_at` |
 | 0008 | State lives in the replication slot and in the data, never in a side file |
 | 0009 | Dedicated replication role, and where its password lives |
+| 0010 | Where the durability boundary sits, and how batches are flushed |
+| 0011 | The contract is checked on the `Relation` message, and what it deliberately skips |
 
 ## Scope
 
