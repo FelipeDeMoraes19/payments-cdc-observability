@@ -106,6 +106,45 @@ Note the ordering column. The LSN is stored twice: `lsn` as the text Postgres pr
 row is the kind of bug that only shows up after a few hundred megabytes of WAL. ADR 0013
 has the measurement.
 
+### Where the two sources meet
+
+The reason there are two ingestion patterns rather than one: a payment in a foreign
+currency is only worth something in BRL once it is crossed with the rate published for the
+day it happened. That join is the whole point of the milestone, and the raw bronze already
+answers it.
+
+```sql
+WITH current_payments AS (
+    SELECT key['payment_id']               AS payment_id,
+           after['currency']               AS currency,
+           after['amount']::DECIMAL(14,2)  AS amount,
+           after['created_at'][1:10]::DATE AS payment_date
+    FROM read_parquet('data/bronze/cdc/payments/**/*.parquet')
+    WHERE action <> 'truncate'
+    QUALIFY row_number() OVER (PARTITION BY key['payment_id'] ORDER BY lsn_numeric DESC) = 1
+)
+SELECT p.payment_id, p.currency, p.amount, r.rate_brl,
+       round(p.amount * coalesce(r.rate_brl, 1), 2) AS amount_brl
+FROM current_payments p
+LEFT JOIN read_parquet('data/bronze/fx/**/*.parquet') r
+       ON r.currency = p.currency AND r.quote_date = p.payment_date
+WHERE p.currency <> 'BRL'
+ORDER BY p.payment_id::BIGINT LIMIT 5;
+```
+
+```
+3 | EUR | 1106.10 | 6.01290000 |  6650.87
+4 | USD |  781.62 | 5.16040000 |  4033.47
+6 | EUR | 2762.44 | 6.01290000 | 16610.28
+8 | USD | 4333.09 | 5.16040000 | 22360.48
+9 | EUR | 3510.59 | 6.01290000 | 21108.83
+```
+
+Milestone 2 turns this into a modelled `fct_payment` with dbt. The `LEFT JOIN` and the
+`coalesce` are deliberate here: a payment made on a day with no published rate keeps its
+amount and loses its conversion, which is exactly the hole a `not_null` test on
+`amount_brl` is meant to find.
+
 ### Exchange rates
 
 ```
