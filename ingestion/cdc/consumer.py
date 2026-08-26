@@ -1,9 +1,7 @@
-import json
 import os
 import select
 import sys
 from contextlib import closing
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,6 +10,7 @@ from psycopg2.extras import LogicalReplicationConnection
 
 from contracts.tables import contract_for
 from contracts.validation import ContractViolation, validate_change, validate_relation
+from ingestion.cdc.bronze import BronzeWriter, PendingRecord
 from ingestion.cdc.pgoutput import (
     Begin,
     Commit,
@@ -62,51 +61,6 @@ def fail_before_feedback() -> bool:
     return os.environ.get("CDC_FAIL_BEFORE_FEEDBACK", "") not in ("", "0")
 
 
-@dataclass(frozen=True)
-class PendingRecord:
-    lsn: int
-    table: str
-    partition: str
-    payload: dict
-
-
-class BronzeWriter:
-    def __init__(self, root: Path) -> None:
-        self._root = root
-
-    def write(self, pending) -> list:
-        groups = {}
-        for record in pending:
-            groups.setdefault((record.table, record.partition), []).append(record)
-        return [
-            self._write_group(table, partition, groups[(table, partition)])
-            for table, partition in sorted(groups)
-        ]
-
-    def discard_stale_staging(self) -> int:
-        if not self._root.exists():
-            return 0
-        stale = list(self._root.rglob("*.jsonl.tmp"))
-        for path in stale:
-            path.unlink()
-        return len(stale)
-
-    def _write_group(self, table: str, partition: str, records: list) -> Path:
-        directory = self._root / table / "dt={}".format(partition)
-        directory.mkdir(parents=True, exist_ok=True)
-        lsns = [record.lsn for record in records]
-        name = "part-{:016X}-{:016X}.jsonl".format(min(lsns), max(lsns))
-        target = directory / name
-        staging = directory / (name + ".tmp")
-        with staging.open("w", encoding="utf-8", newline="\n") as stream:
-            for record in records:
-                stream.write(json.dumps(record.payload) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(staging, target)
-        return target
-
-
 def ensure_slot() -> str:
     with closing(psycopg2.connect(**connection_params())) as connection:
         connection.autocommit = True
@@ -138,41 +92,42 @@ def build_record(change, lsn: int, transaction: Begin) -> dict:
                 )
             )
         key = {name: source_values[name] for name in change.relation.key_columns}
-    record = {
+    return {
         "source": "postgres",
-        "ingested_at": datetime.now(timezone.utc).isoformat(),
+        "ingested_at": datetime.now(timezone.utc),
         "lsn": format_lsn(lsn),
+        "lsn_numeric": lsn,
         "xid": transaction.xid,
-        "commit_time": transaction.commit_time.isoformat(),
+        "commit_time": transaction.commit_time,
         "action": change.action,
-        "schema": change.relation.namespace,
-        "table": change.relation.name,
+        "schema_name": change.relation.namespace,
+        "table_name": change.relation.name,
         "key": key,
         "before": change.old_values,
         "after": change.new_values,
+        "unchanged_toast_columns": list(change.unchanged_columns),
+        "truncate_cascade": None,
+        "truncate_restart_identity": None,
     }
-    if change.unchanged_columns:
-        record["unchanged_toast_columns"] = list(change.unchanged_columns)
-    return record
 
 
 def build_truncate_record(relation, truncate: Truncate, lsn: int, transaction: Begin) -> dict:
     return {
         "source": "postgres",
-        "ingested_at": datetime.now(timezone.utc).isoformat(),
+        "ingested_at": datetime.now(timezone.utc),
         "lsn": format_lsn(lsn),
+        "lsn_numeric": lsn,
         "xid": transaction.xid,
-        "commit_time": transaction.commit_time.isoformat(),
+        "commit_time": transaction.commit_time,
         "action": "truncate",
-        "schema": relation.namespace,
-        "table": relation.name,
+        "schema_name": relation.namespace,
+        "table_name": relation.name,
         "key": None,
         "before": None,
         "after": None,
-        "truncate_options": {
-            "cascade": truncate.cascade,
-            "restart_identity": truncate.restart_identity,
-        },
+        "unchanged_toast_columns": None,
+        "truncate_cascade": truncate.cascade,
+        "truncate_restart_identity": truncate.restart_identity,
     }
 
 
@@ -249,7 +204,6 @@ def run(writer: BronzeWriter) -> int:
                     contract_for(decoded.namespace, decoded.name),
                     format_lsn(transaction.final_lsn) if transaction else None,
                 )
-                continue
             elif isinstance(decoded, Commit):
                 transaction = None
                 confirm_lsn = message.wal_end
@@ -288,9 +242,7 @@ def run(writer: BronzeWriter) -> int:
                     )
                 validate_change(
                     decoded,
-                    contract_for(
-                        decoded.relation.namespace, decoded.relation.name
-                    ),
+                    contract_for(decoded.relation.namespace, decoded.relation.name),
                     format_lsn(message.data_start),
                 )
                 if not pending:
