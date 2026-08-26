@@ -1,0 +1,8 @@
+CLAUDE.md
+docs/plan.md
+data/
+
+.env
+__pycache__/
+*.pyc
+.venv/
