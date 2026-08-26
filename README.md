@@ -38,6 +38,8 @@ them; the rest are marked *planned* and are not claims yet.
 | A row is deleted at the source | `DELETE` on a published table | silver keeps the row with its last known values and marks `is_deleted`, so the date of death survives | **Yes** — `tests/test_silver.py` |
 | An unchanged TOASTed column arrives absent | an `UPDATE` touching only another column of a row with a large value | the marker recorded in bronze, and the last known value carried forward in silver | **Yes** — `tests/test_silver.py` |
 | A value in bronze cannot be typed | a bronze file written outside the ingestion path | silver refuses to run, naming the column, the observed value and the expected type | **Yes** — `tests/test_silver.py` |
+| Reverting a schema change does not unblock the stream | change a column type, let the consumer stop, then revert the column | nothing automatic: the slot's backlog still carries the old shape, so the consumer stays stopped until someone decides what to do with it | **Yes, it stays stopped** — deliberately; recovery is a human decision (ADR 0018) |
+| Running the whole pipeline twice changes the gold | run ingestion, silver and dbt twice over the same source | nothing should change; every model is a deterministic function of the data, with no execution clock anywhere | **Yes** — `tests/test_gold_determinism.py` |
 | A replication slot is left without a consumer | `make chaos-orphan-slot` | a Grafana alert on the WAL the slot retains | *Planned, Milestone 3* |
 | Data arrives late | `make chaos-late` | a dbt freshness test | *Planned, Milestone 3* |
 | A day of exchange rates is missing | `make chaos-fx-gap` | a `not_null` test on `amount_brl` | *Planned, Milestone 3* |
@@ -252,6 +254,15 @@ reading dbt's own macros.
 is deliberately nullable: a day with no published rate leaves it empty rather than
 guessing, which is what a `not_null` test can then catch.
 
+**Determinism.** Running the whole pipeline twice over the same source leaves the gold
+identical, table by table and row by row, and there is a test that proves it. No model
+reads an execution clock; every surrogate key is derived from the data.
+
+**Backfill by interval is not built yet, and saying so is the point.** Today the pipeline
+rebuilds everything from bronze, so "run it for the 12th" has no meaning to express. That
+half of the milestone's acceptance criterion arrives with the Airflow DAG, which is what
+introduces a date parameter in the first place. It is pending, not passing.
+
 ### Schema contracts
 
 Every published table is declared in `contracts/`: its columns, their Postgres types, and
@@ -300,7 +311,9 @@ matters most is *rejected alternatives and why*.
 | 0013 | Bronze in Parquet, the tuple as a `MAP`, and the LSN stored twice |
 | 0014 | The BCB extractor: SGS series, monthly windows, watermark in the data |
 | 0015 | Spark runs in a container, and why Spark is here at all |
-| 0016 | Silver semantics: one row per key, and what happens to what died |
+| 0016 | Silver semantics: the cleaned change log, and what happens to what died |
+| 0017 | SCD Type 2 built from the change log, and why `dbt snapshot` was rejected |
+| 0018 | Recovering from a contract violation, and why reverting the source is not enough |
 
 ## Scope
 
