@@ -47,6 +47,13 @@ them; the rest are marked *planned* and are not claims yet.
 | Nothing is being ingested at all | `make chaos-empty` | a heartbeat alert in Grafana | *Planned, Milestone 3* |
 | **A blind alert** | `make chaos-blind` | **nothing — the alert cannot fire** | *Planned, Milestone 3* — **and it will stay "no", on purpose** |
 
+One row deserves its reasoning in the open. When a change violates the schema contract,
+the consumer stops and stays stopped, and reverting the column at the source does not
+unblock it, because the slot's backlog still carries the old shape. Skipping the offending
+change automatically would keep the pipeline green and leave a hole in bronze the exact
+size of the problem. **Discarding data is a business decision, and no code should be
+making it alone at three in the morning.** ADR 0018 has the recovery paths and their costs.
+
 The last row is the point of the exercise, and it is written down before it exists: an
 alert whose threshold the metric can never reach. It stays in the repository, documented,
 because "we do not detect this, and here is exactly why" is a sentence most systems need
