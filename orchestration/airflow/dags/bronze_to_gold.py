@@ -6,25 +6,18 @@ from airflow.sdk import DAG
 PROJECT = "/opt/project"
 
 with DAG(
-    dag_id="cdc_to_gold",
+    dag_id="bronze_to_gold",
     description=(
-        "Drain the replication slot, rebuild silver, rebuild gold. Position based, "
-        "not date based: a replication slot has one position, not a calendar."
+        "Rebuild silver and gold from whatever bronze holds. Position based, not date "
+        "based: the CDC service feeds bronze continuously and a slot has one position, "
+        "not a calendar."
     ),
     start_date=datetime(2026, 8, 1),
     schedule="*/15 * * * *",
     catchup=False,
     max_active_runs=1,
-    tags=["ingestion", "cdc", "transform"],
+    tags=["transform"],
 ) as dag:
-    drain = BashOperator(
-        task_id="drain_replication_slot",
-        cwd=PROJECT,
-        env={"PYTHONPATH": PROJECT, "CDC_IDLE_TIMEOUT": "20"},
-        append_env=True,
-        bash_command="python -m ingestion.cdc.consumer",
-    )
-
     silver = BashOperator(
         task_id="build_silver",
         cwd=PROJECT,
@@ -46,4 +39,4 @@ with DAG(
         bash_command="dbt build",
     )
 
-    drain >> silver >> gold
+    silver >> gold

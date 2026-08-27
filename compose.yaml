@@ -23,6 +23,8 @@ services:
       AIRFLOW_DB_USER: ${AIRFLOW_DB_USER:-airflow}
       AIRFLOW_DB_NAME: ${AIRFLOW_DB_NAME:-airflow}
       AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD:?copy .env.example to .env before starting the stack}
+      GRAFANA_DB_USER: ${GRAFANA_DB_USER:-grafana}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?copy .env.example to .env before starting the stack}
     ports:
       - "${POSTGRES_PORT:-5434}:5432"
     volumes:
@@ -49,6 +51,58 @@ services:
       SPARK_MASTER: ${SPARK_MASTER:-local[*]}
     volumes:
       - .:/opt/project
+
+  cdc:
+    image: payments-cdc-runner:3.3.1
+    build:
+      context: .
+      dockerfile: docker/runner.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /opt/project
+    environment:
+      PYTHONPATH: /opt/project
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-payments}
+      CDC_USER: ${CDC_USER:-cdc}
+      CDC_PASSWORD: ${CDC_PASSWORD:?copy .env.example to .env before starting the stack}
+      CDC_SLOT: ${CDC_SLOT:-payments_cdc}
+      CDC_PUBLICATION: ${CDC_PUBLICATION:-payments_pub}
+      CDC_IDLE_TIMEOUT: "0"
+      CDC_METRICS: "1"
+      CDC_METRICS_PORT: "9108"
+    ports:
+      - "${CDC_METRICS_PORT:-9108}:9108"
+    volumes:
+      - .:/opt/project
+    command: ["bash", "-c", "python -m ingestion.cdc.consumer"]
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    depends_on:
+      - cdc
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  grafana:
+    image: grafana/grafana:12.3.1
+    depends_on:
+      - prometheus
+      - postgres
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?copy .env.example to .env before starting the stack}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
 
   airflow-init:
     image: payments-cdc-runner:3.3.1
@@ -122,3 +176,5 @@ services:
 
 volumes:
   pgdata:
+  prometheus-data:
+  grafana-data:

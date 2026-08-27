@@ -12,7 +12,7 @@ MARKER = "===SECTION==="
 
 PROBE_DAGS = """
 import importlib.util
-for name in ('fx_daily', 'cdc_to_gold'):
+for name in ('fx_daily', 'bronze_to_gold'):
     path = '/opt/project/orchestration/airflow/dags/%s.py' % name
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -76,9 +76,9 @@ def cli():
 
 def test_both_dags_exist_and_neither_catches_up(cli):
     assert "fx_daily" in cli["dags_list"]
-    assert "cdc_to_gold" in cli["dags_list"]
+    assert "bronze_to_gold" in cli["dags_list"]
     assert "fx_daily catchup=False" in cli["catchup"]
-    assert "cdc_to_gold catchup=False" in cli["catchup"]
+    assert "bronze_to_gold catchup=False" in cli["catchup"]
 
 
 def test_the_extractor_receives_the_date_of_its_own_interval(cli):

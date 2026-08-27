@@ -1,4 +1,4 @@
-.PHONY: env up down reset seed cdc fx runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
+.PHONY: env up down reset seed fx runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
 
 env:
 	python scripts/bootstrap_env.py
@@ -16,8 +16,6 @@ reset: env
 seed:
 	python -m generator.synthetic_load
 
-cdc:
-	python -m ingestion.cdc.consumer
 
 fx:
 	python -m ingestion.batch.bcb_fx
@@ -53,10 +51,14 @@ test:
 	python -m pytest -m 'not e2e' -v
 
 test-e2e:
-	python -m pytest -m e2e -v
+	docker compose stop cdc
+	-python -m pytest -m e2e -v
+	docker compose start cdc
 
 test-all:
-	python -m pytest -v
+	docker compose stop cdc
+	-python -m pytest -v
+	docker compose start cdc
 
 slots:
 	docker compose exec -T postgres psql -U $${POSTGRES_USER:-payments} -d $${POSTGRES_DB:-payments} -c "SELECT slot_name, active, restart_lsn, confirmed_flush_lsn, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained_wal FROM pg_replication_slots ORDER BY slot_name;"

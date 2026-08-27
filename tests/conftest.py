@@ -23,6 +23,32 @@ def source_params() -> dict:
     )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def cdc_service_must_be_stopped():
+    """The suite and the long running consumer cannot share the source.
+
+    Every test owns its own replication slot, and slots coexist, so that is not
+    the problem. The problem is the tables: fixtures delete every row, and the
+    schema contract test changes a column type. A running consumer would ingest
+    the deletions into the development bronze, and the type change would kill it
+    for good, because ADR 0018 says a contract violation stops the consumer and
+    the slot's backlog still carries the old shape.
+
+    make test-e2e and make test-chaos stop the service and start it again. This
+    guard exists so that running pytest by hand fails with a sentence instead of
+    with a mystery.
+    """
+    running = subprocess.run(
+        ["docker", "compose", "ps", "--status", "running", "--services"],
+        cwd=str(ROOT), capture_output=True, timeout=60,
+    ).stdout.decode("utf-8", "replace").split()
+    assert "cdc" not in running, (
+        "the cdc service is running and would fight this suite for the source "
+        "tables; stop it with 'docker compose stop cdc', or use make test-e2e "
+        "which does it for you"
+    )
+
+
 @pytest.fixture
 def postgres():
     load_env_file()

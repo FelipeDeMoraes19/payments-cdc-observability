@@ -97,14 +97,23 @@ pipeline instead of quietly reshaping the data.
 ## Quick start
 
 ```
-cp .env.example .env
-docker compose up -d
-pip install -r requirements.txt
-python -m ingestion.cdc.consumer
+make up
 ```
 
-`make up`, `make seed`, `make cdc` and `make test` wrap the same commands. Running the
-tests needs `pip install -r requirements-dev.txt` as well.
+That is the whole thing. It generates `.env` on first run, replacing the placeholders in
+`.env.example` with random secrets, and brings up Postgres and the CDC consumer. Nothing
+real is ever committed, and a fresh clone does not need a file that only exists on someone
+else's machine.
+
+Without `make`, the same two steps:
+
+```
+python scripts/bootstrap_env.py
+docker compose up -d
+```
+
+`make seed` drives synthetic load into the source. `make test` runs the fast suite;
+running the tests also needs `pip install -r requirements-dev.txt`.
 
 The consumer writes one row per change into
 `data/bronze/cdc/<table>/dt=<commit date>/part-<first LSN>-<last LSN>.parquet`, and
@@ -121,6 +130,29 @@ on.
 
 Postgres is published on **port 5434**, not 5432, to avoid colliding with an existing
 local instance.
+
+## The consumer is a service, and that is not streaming
+
+The CDC consumer runs continuously, as a container that `docker compose up` starts. It
+holds the replication slot, writes bronze, and exports two metrics on `:9108/metrics`.
+
+**This does not move the scope fence.** The project rules out real streaming, and a long
+running consumer is not stream processing: it reads the write ahead log and writes files.
+Every transformation after it is still a batch, every fifteen minutes, triggered by
+Airflow. No sliding windows, no streaming state, no Kafka and no Flink. What changed is
+that the ingestion stopped pretending to have a schedule — it never had one, which is the
+whole argument for having two DAGs.
+
+The change was forced by measurement, not by taste. As an Airflow task the consumer lived
+about 25 seconds out of every 900, and its counter restarted from zero on every run. A
+heartbeat alert over that series would have been useless in both directions: with missing
+data treated as normal it would have been permanently blind, and with missing data treated
+as alerting it would have screamed continuously. ADR 0019 has the numbers.
+
+**Duration is not measured here.** Airflow already records task duration and dbt records it
+per model in `run_results.json`. Exporting it to Prometheus would need a Pushgateway for
+the batch steps, adding a service to feed a number no alert reads. The orchestrator already
+measures it; this does not duplicate it.
 
 ## Querying the bronze
 

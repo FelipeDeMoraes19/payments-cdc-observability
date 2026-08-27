@@ -143,3 +143,71 @@ schema** — a mesma bifurcação rejeitada no ADR 0015.
   `chaos-fx-gap` acontecendo sozinho, com o detector já no lugar.
 - Reprocessar a metade CDC significa reconstruir do bronze. O bronze é a fonte de verdade
   do reprocessamento, que é a razão de ele guardar o evento cru desde o ADR 0013.
+
+## Emenda de 2026-08-27 — o consumidor vira serviço, e a DAG vira `bronze_to_gold`
+
+A decisão original punha o consumidor CDC como primeira tarefa da DAG. **O raciocínio deste
+ADR não muda** — o CDC continua sem data, o slot continua com posição e não com calendário,
+e continuam sendo duas DAGs pelo mesmo motivo. O que muda é **onde o consumidor roda**.
+
+### O achado, que vale mais que a justificativa arquitetural
+
+A fatia vertical do heartbeat foi construída antes de qualquer alerta existir, e revelou
+que **o alerta de heartbeat no desenho antigo teria sido inútil dos dois jeitos possíveis**.
+
+Como tarefa de DAG, o consumidor vive ~25 segundos a cada 900:
+
+```
+fracao do tempo no ar : 2.8%
+raspagens a cada 15s  : 1 em cada 36 encontra o processo vivo
+```
+
+E o contador reinicia do zero a cada execução, porque é processo novo. Sobre essa série,
+o alerta teria dois destinos e nenhum deles serve:
+
+- com **"No Data" tratado como Normal**, ele ficaria **cego** — sem série na maior parte do
+  tempo, e sem série sendo OK, nunca dispararia;
+- com **"No Data" tratado como Alerting**, ele **gritaria o tempo todo**, porque a ausência
+  é o estado normal desse desenho.
+
+Isto é o ADR 0006 acontecendo por acidente, dentro do próprio projeto, antes de chegarmos
+ao cenário construído para demonstrá-lo. Um alerta pode estar cego por causa de uma
+decisão de arquitetura tomada meses antes, sem ninguém escrever nada errado no alerta.
+É evidência encontrada, não demonstração montada, e é o motivo de este parágrafo existir.
+
+### A decisão
+
+O consumidor passa a ser **serviço de longa duração** no Compose, com `CDC_IDLE_TIMEOUT=0`,
+expondo `/metrics`. A DAG perde a tarefa de drenagem e se chama **`bronze_to_gold`**, porque
+`cdc_to_gold` deixou de descrever o que ela faz: ela transforma o bronze que o serviço
+alimenta.
+
+`restart: "no"` no serviço, deliberadamente. O ADR 0018 diz que uma violação de contrato
+para o consumidor e a recuperação é decisão humana; uma política de reinício transformaria
+isso num laço de morte e renascimento, que é barulho e não sinal.
+
+### Isto não fura a cerca da seção 2 do plano
+
+O plano proíbe "streaming de verdade". Um consumidor de longa duração **não é
+processamento de stream**: ele lê o WAL e escreve arquivo, e toda a transformação continua
+em lote, de quinze em quinze minutos, disparada pelo Airflow. Não há janela deslizante, não
+há estado de streaming, não há Kafka nem Flink. O que mudou foi **parar de fingir que a
+ingestão tem agendamento** — ela nunca teve, e o ADR inteiro acima é sobre isso.
+
+### Como os testes convivem com o serviço
+
+Verificado antes de decidir: **cada teste já usa slot próprio**, e slots coexistem na mesma
+publication — o teste de decomposição por lote prova isso com dois slots simultâneos. Não
+existe disputa por slot.
+
+A disputa real é pelas **tabelas**. Os fixtures apagam todas as linhas, o que poluiria o
+bronze de desenvolvimento, e o teste do critério A2 altera o tipo de uma coluna, o que
+**mataria o serviço para valer** — pelo ADR 0018, o backlog do slot continuaria carregando
+a forma antiga mesmo depois de a origem ser revertida.
+
+Por isso a suíte exige o serviço parado. `make test-e2e` e `make test-chaos` param e
+religam sozinhos, e uma guarda de sessão no `conftest.py` falha na primeira linha com a
+instrução, para que rodar `pytest` na mão dê uma frase em vez de um mistério.
+
+Alternativa rejeitada: publicação e tabelas separadas para teste. Nenhuma separação de
+publicação salva do `ALTER TABLE`, que é o caso fatal.
