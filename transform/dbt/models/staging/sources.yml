@@ -11,6 +11,20 @@ sources:
       - name: customers
       - name: merchants
       - name: payments
+        description: >
+          Freshness is measured on created_at, the business event time, not on the
+          moment of ingestion. A pipeline that keeps reprocessing a source that died
+          would look fresh under ingested_at; whether the pipeline is running at all
+          is what the heartbeat alert answers, and asking it twice adds nothing.
+
+          The threshold has a floor: this pipeline batches bronze every 60s and
+          rebuilds silver in about 50s, so data is never newer than roughly two
+          minutes by the time it is visible here. A freshness threshold under that
+          reports stale forever, which is as useless as never reporting at all.
+        loaded_at_field: created_at
+        freshness:
+          warn_after: {count: "{{ var('freshness_warn_minutes', 10) }}", period: minute}
+          error_after: {count: "{{ var('freshness_error_minutes', 30) }}", period: minute}
 
   - name: bronze
     description: Exchange rates land already typed, so gold reads them from bronze.

@@ -1,4 +1,4 @@
-.PHONY: env alerts up down reset seed fx test-chaos chaos-empty chaos-orphan-slot chaos-fx-gap chaos-pii chaos-blind chaos-heal runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
+.PHONY: env alerts up down reset seed fx test-chaos chaos-empty chaos-late chaos-orphan-slot chaos-fx-gap chaos-pii chaos-blind chaos-heal runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
 
 env:
 	python scripts/bootstrap_env.py
@@ -76,6 +76,12 @@ chaos-empty:
 	@echo "generator stopped. the heartbeat alert reads increase(cdc_records_written_total[10m]);"
 	@echo "watch it go from firing-nothing to firing at http://localhost:$${GRAFANA_PORT:-3000}"
 
+chaos-late:
+	GEN_LATENESS_HOURS=48 docker compose up -d --force-recreate generator
+	@echo "generator now emits events dated 48h in the past; ingestion volume is unchanged"
+	@echo "wait a minute for bronze, then: make silver"
+	@echo "now: cd transform/dbt && DBT_PROFILES_DIR=. dbt source freshness"
+
 chaos-orphan-slot:
 	python chaos/require_alerts.py
 	docker compose stop cdc
@@ -98,4 +104,5 @@ chaos-blind:
 
 chaos-heal:
 	docker compose start cdc generator
+	docker compose up -d --force-recreate generator
 	@echo "services back up. run make fx to refill any removed exchange rates."

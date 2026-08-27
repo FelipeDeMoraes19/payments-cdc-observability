@@ -108,6 +108,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payments}
       GEN_DURATION_SECONDS: "0"
       GEN_RATE_PER_SECOND: ${GEN_RATE_PER_SECOND:-0.5}
+      GEN_LATENESS_HOURS: ${GEN_LATENESS_HOURS:-0}
     volumes:
       - .:/opt/project
     command: ["bash", "-c", "python -m generator.synthetic_load"]

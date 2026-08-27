@@ -52,7 +52,7 @@ def ensure_dimensions(connection, customer_target: int, merchant_target: int) ->
     return customers, merchants
 
 
-def run(connection, customers, merchants, duration: float, rate: float, rng) -> tuple:
+def run(connection, customers, merchants, duration: float, rate: float, rng, lateness: int = 0) -> tuple:
     """A duration of zero runs until the process is stopped.
 
     That is how it runs as a service. The heartbeat alert compares against a
@@ -68,13 +68,15 @@ def run(connection, customers, merchants, duration: float, rate: float, rng) -> 
     while deadline is None or time.monotonic() < deadline:
         with connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO payments (customer_id, merchant_id, amount, currency, status) "
-                "VALUES (%s, %s, %s, %s, 'pending') RETURNING payment_id",
+                "INSERT INTO payments (customer_id, merchant_id, amount, currency, "
+                "status, created_at) VALUES (%s, %s, %s, %s, 'pending', "
+                "now() - make_interval(hours => %s)) RETURNING payment_id",
                 (
                     rng.choice(customers),
                     rng.choice(merchants),
                     round(rng.uniform(5.0, 5000.0), 2),
                     rng.choice(CURRENCIES),
+                    lateness,
                 ),
             )
             recent.append(cursor.fetchone()[0])
@@ -111,7 +113,10 @@ def main() -> int:
             int(os.environ.get("GEN_CUSTOMERS", "20")),
             int(os.environ.get("GEN_MERCHANTS", "5")),
         )
-        inserted, updated = run(connection, customers, merchants, duration, rate, rng)
+        inserted, updated = run(
+            connection, customers, merchants, duration, rate, rng,
+            int(os.environ.get("GEN_LATENESS_HOURS", "0")),
+        )
     finally:
         connection.close()
     print(
