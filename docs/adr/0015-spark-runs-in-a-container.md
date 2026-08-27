@@ -10,15 +10,37 @@ precisam de resposta honesta: **onde ele executa** e **por que é Spark**.
 
 ## Decisão
 
-**Spark 4.2.0 com Java 21, dentro de um container**, em `local[*]`. Imagem oficial
-`apache/spark:4.2.0-java21-python3` com uma camada fina por cima instalando o
-`requirements.txt` do projeto, para que o job importe `contracts/` e escreva Parquet com o
-mesmo `pyarrow` do resto.
+**Spark 4.2.0 dentro de um container**, em `local[*]`. **PySpark não é instalado na máquina
+do autor.**
+
+> **Emenda de 2026-08-26.** A decisão original usava a imagem oficial
+> `apache/spark:4.2.0-java21-python3` com uma camada fina por cima. **O raciocínio abaixo
+> continua inteiro e a conclusão não mudou** — o Spark não roda no host, pelos três motivos
+> medidos. O que mudou foi **qual imagem**, e por uma razão que só apareceu com o Airflow.
+>
+> Agora existe **uma imagem só**, construída sobre a imagem oficial do Airflow, com JRE 17,
+> `pyspark` instalado por `pip` e o `dbt-duckdb` junto. O `make silver` e as tarefas da DAG
+> usam **a mesma imagem**.
+>
+> O motivo decisivo não é robustez, é **bifurcação**: com o Airflow invocando o Spark, a
+> alternativa seria ele chamar um container irmão pelo socket do Docker, e passariam a
+> existir dois caminhos para rodar o mesmo job — o `make silver` por uma imagem e a DAG por
+> outra. Dois caminhos divergem, e no dia em que divergirem o sintoma é *"funciona no make
+> e falha na DAG"*, que é o pior tipo de defeito para diagnosticar. Caminho único ou nada.
+>
+> **Java 17, e o 21 foi considerado e descartado.** O Spark 4.2 suporta 17 oficialmente. O
+> 17 vem do repositório principal do Debian bookworm, que é a base da imagem do Airflow; o
+> 21 exigiria backports ou uma fonte de pacote externa. Adicionar fonte externa por uma
+> diferença invisível neste volume é dívida que cobra depois, na hora em que o build quebra
+> por um motivo que ninguém lembra.
+>
+> Rejeitado junto: **Airflow chamando containers irmãos pelo socket do Docker**. Mantém as
+> imagens finas e o container do Airflow passa a precisar do CLI do Docker, do socket
+> montado e do nome do projeto compose do hospedeiro. É docker-dentro-de-docker: um modo de
+> falha novo que não ensina nada sobre dados.
 
 O job é batch, não serviço: sobe com `docker compose run --rm`, e o serviço fica atrás de
 um profile para não subir junto no `docker compose up`.
-
-**PySpark não é instalado na máquina do autor.**
 
 ## Alternativas rejeitadas
 

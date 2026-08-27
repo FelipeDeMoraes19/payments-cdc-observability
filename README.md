@@ -321,6 +321,7 @@ matters most is *rejected alternatives and why*.
 | 0016 | Silver semantics: the cleaned change log, and what happens to what died |
 | 0017 | SCD Type 2 built from the change log, and why `dbt snapshot` was rejected |
 | 0018 | Recovering from a contract violation, and why reverting the source is not enough |
+| 0019 | What a date means in this pipeline, and why there are two DAGs |
 
 ## Scope
 
