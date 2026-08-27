@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg2
+from opentelemetry.metrics import Observation
 from psycopg2.extras import LogicalReplicationConnection
 
 from contracts.tables import contract_for
@@ -21,6 +22,7 @@ from ingestion.cdc.pgoutput import (
     format_lsn,
 )
 from ingestion.env import load_env_file, required
+from observability.otel.metrics import serve
 
 
 def connection_params() -> dict:
@@ -55,6 +57,10 @@ def batch_max_records() -> int:
 
 def batch_max_seconds() -> float:
     return float(os.environ.get("CDC_BATCH_MAX_SECONDS", "5"))
+
+
+def metrics_enabled() -> bool:
+    return os.environ.get("CDC_METRICS", "") not in ("", "0")
 
 
 def fail_before_feedback() -> bool:
@@ -144,7 +150,33 @@ def _batch_is_full(pending: list, opened_at: datetime) -> bool:
     return elapsed >= batch_max_seconds()
 
 
-def _flush(writer: BronzeWriter, cursor, pending: list, confirm_lsn: int) -> int:
+class Telemetry:
+    def __init__(self, meter=None) -> None:
+        self._confirmed_lsn = 0
+        if meter is None:
+            self._written = None
+            return
+        self._written = meter.create_counter(
+            "cdc_records_written",
+            unit="1",
+            description="Change events durably written to bronze",
+        )
+        meter.create_observable_gauge(
+            "cdc_confirmed_lsn",
+            callbacks=[lambda options: [Observation(self._confirmed_lsn)]],
+            unit="1",
+            description="Highest LSN confirmed to the replication slot",
+        )
+
+    def record(self, pending: list, confirm_lsn: int) -> None:
+        self._confirmed_lsn = confirm_lsn
+        if self._written is None:
+            return
+        for record in pending:
+            self._written.add(1, {"table": record.table})
+
+
+def _flush(writer: BronzeWriter, cursor, pending: list, confirm_lsn: int, telemetry) -> int:
     paths = writer.write(pending)
     if fail_before_feedback():
         print(
@@ -156,6 +188,7 @@ def _flush(writer: BronzeWriter, cursor, pending: list, confirm_lsn: int) -> int
         sys.stderr.flush()
         os._exit(17)
     cursor.send_feedback(flush_lsn=confirm_lsn, force=True)
+    telemetry.record(pending, confirm_lsn)
     print(
         "flushed {} records into {} file(s), confirmed {}".format(
             len(pending), len(paths), format_lsn(confirm_lsn)
@@ -165,7 +198,7 @@ def _flush(writer: BronzeWriter, cursor, pending: list, confirm_lsn: int) -> int
     return len(pending)
 
 
-def run(writer: BronzeWriter) -> int:
+def run(writer: BronzeWriter, telemetry: Telemetry) -> int:
     decoder = Decoder()
     connection = psycopg2.connect(
         connection_factory=LogicalReplicationConnection, **connection_params()
@@ -187,7 +220,7 @@ def run(writer: BronzeWriter) -> int:
             message = cursor.read_message()
             if message is None:
                 if pending and transaction is None:
-                    written += _flush(writer, cursor, pending, confirm_lsn)
+                    written += _flush(writer, cursor, pending, confirm_lsn, telemetry)
                     pending = []
                     opened_at = None
                 if exit_deadline is not None and datetime.now(timezone.utc) >= exit_deadline:
@@ -208,7 +241,7 @@ def run(writer: BronzeWriter) -> int:
                 transaction = None
                 confirm_lsn = message.wal_end
                 if pending and _batch_is_full(pending, opened_at):
-                    written += _flush(writer, cursor, pending, confirm_lsn)
+                    written += _flush(writer, cursor, pending, confirm_lsn, telemetry)
                     pending = []
                     opened_at = None
             elif isinstance(decoded, Truncate):
@@ -268,8 +301,9 @@ def main() -> int:
     if discarded:
         print("discarded {} stale staging file(s)".format(discarded), file=sys.stderr)
     print("slot {} ({})".format(slot_name(), ensure_slot()), file=sys.stderr)
+    telemetry = Telemetry(serve("cdc-consumer") if metrics_enabled() else None)
     try:
-        written = run(writer)
+        written = run(writer, telemetry)
     except ContractViolation as violation:
         print("contract violation: {}".format(violation), file=sys.stderr)
         return 2

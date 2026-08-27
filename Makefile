@@ -1,12 +1,15 @@
-.PHONY: up down reset seed cdc fx runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
+.PHONY: env up down reset seed cdc fx runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
 
-up:
+env:
+	python scripts/bootstrap_env.py
+
+up: env
 	docker compose up -d
 
 down:
 	docker compose down
 
-reset:
+reset: env
 	docker compose down -v
 	docker compose up -d
 
