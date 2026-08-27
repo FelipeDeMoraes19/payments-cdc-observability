@@ -44,12 +44,30 @@ them; the rest are marked *planned* and are not claims yet.
 | The size of the consumer's batch leaks into the result | two slots created before any change, one drained in a single batch and one a record at a time | nothing should differ; batch size may change the file layout but never the data | **Yes** — `tests/test_batch_decomposition.py` |
 | Extracting a window differs from extracting its days | fetch the 1st to the 7th in one call, and again as seven single day calls | nothing should differ, because a window rewrites its whole month | **Yes** — `tests/test_fx_extractor.py` |
 | An init script fails and the database comes up incomplete | drop an artifact the init scripts create, standing in for the script that failed to create it | the healthcheck, which asks whether the init finished rather than whether the port answers | **Yes** — `tests/test_healthcheck_detects_incomplete_init.py` |
-| A replication slot is left without a consumer | `make chaos-orphan-slot` | a Grafana alert on the WAL the slot retains | *Planned, Milestone 3* |
+| A replication slot is left without a consumer | `make chaos-orphan-slot` stops the consumer and leaves the slot | a Grafana alert reading retained WAL from Postgres by SQL, because a dead consumer cannot report its own death | **Yes** — `tests/test_alerts_can_fire.py` proves the alert can fire |
 | Data arrives late | `make chaos-late` | a dbt freshness test | *Planned, Milestone 3* |
 | A day of exchange rates is missing | `make chaos-fx-gap` | a `not_null` test on `amount_brl` | *Planned, Milestone 3* |
 | PII reaches the gold layer | `make chaos-pii` | a custom test for CPF patterns in gold | *Planned, Milestone 3* |
-| Nothing is being ingested at all | `make chaos-empty` | a heartbeat alert in Grafana | *Planned, Milestone 3* |
-| **A blind alert** | `make chaos-blind` | **nothing — the alert cannot fire** | *Planned, Milestone 3* — **and it will stay "no", on purpose** |
+| Nothing is being ingested at all | `make chaos-empty` stops the generator | a heartbeat alert over `increase(cdc_records_written_total[10m])` | **Yes** — `tests/test_alerts_can_fire.py` proves the alert can fire |
+| **A blind alert** | `make chaos-blind` injects nothing, because nothing can be injected | **nothing — the alert queries a label no series carries and treats no data as normal** | **No, on purpose** — and `tests/test_alerts_can_fire.py` asserts it is still blind for both reasons |
+
+### Known limitations, not detected and not fixed
+
+**Bronze grows without bound.** The consumer writes a file per batch and nothing ever
+compacts or expires them. At the default rate that is roughly 1440 small files a day, and a
+week of leaving `make up` running would leave tens of thousands of them, which is exactly
+the small file problem that makes Spark slow. Compaction and retention are real work and
+they are out of scope here; this line exists because a repository about documenting what it
+does not detect should also document what it does not clean up. Stop the services, or delete
+`data/bronze` and let it rebuild from the source.
+
+**The vacuity guard covers one kind of blindness.** It finds alerts whose query returns no
+series. An alert with a healthy query and an unreachable threshold would pass it and be just
+as blind.
+
+**Alert rules are not provisioned by `docker compose up`.** They come from `make alerts`. On
+a stack where nobody ran it there are no alerts at all, which the guard catches by asserting
+the rule count before inspecting anything.
 
 One row is worth reading twice, because it needed no knowledge of this project to find.
 **Passing a healthcheck and being ready for use are different things.** An init script here

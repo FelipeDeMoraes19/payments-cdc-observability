@@ -34,6 +34,10 @@ def silver_root() -> str:
     return os.environ.get("SILVER_ROOT", "data/silver")
 
 
+def masking_enabled() -> bool:
+    return os.environ.get("PII_MASKING", "on").lower() not in ("off", "0", "false")
+
+
 def masking_key() -> bytes:
     value = os.environ.get("PII_HMAC_KEY", "")
     if not value:
@@ -154,15 +158,27 @@ def build_silver(frame, contract: TableContract, mask):
 
 
 def main() -> int:
-    key = masking_key()
+    if masking_enabled():
+        key = masking_key()
+
+        def mask_value(value):
+            if value is None:
+                return None
+            return hmac.new(key, value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    else:
+        for _ in range(3):
+            print(
+                "PII MASKING IS OFF. Personal data is being written to silver in the "
+                "clear. This exists for make chaos-pii and must never be how it runs.",
+                file=sys.stderr,
+            )
+
+        def mask_value(value):
+            return value
+
     spark = build_session("bronze-to-silver")
     spark.sparkContext.setLogLevel("WARN")
-
-    def mask_value(value):
-        if value is None:
-            return None
-        return hmac.new(key, value.encode("utf-8"), hashlib.sha256).hexdigest()
-
     mask = F.udf(mask_value, T.StringType())
     written = {}
     try:
