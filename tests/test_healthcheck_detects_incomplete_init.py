@@ -28,9 +28,23 @@ def wait_for(state: str) -> bool:
     return False
 
 
+def configured_password() -> str:
+    for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
+        if line.startswith("GRAFANA_DB_PASSWORD="):
+            return line.split("=", 1)[1]
+    raise AssertionError("GRAFANA_DB_PASSWORD is not in .env")
+
+
 @pytest.fixture
 def grafana_role(postgres):
-    password = "restored-by-the-test"
+    """Restores the role with the password the rest of the stack expects.
+
+    An earlier version invented one. The role came back, the healthcheck went
+    green, and Grafana's data source quietly stopped authenticating until another
+    test tripped over it. A restore that leaves the system subtly broken is worse
+    than no restore, because it looks finished.
+    """
+    password = configured_password()
     yield
     with postgres.cursor() as cursor:
         cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = 'grafana'")

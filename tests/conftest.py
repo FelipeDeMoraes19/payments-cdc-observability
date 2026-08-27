@@ -23,8 +23,8 @@ def source_params() -> dict:
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
-def cdc_service_must_be_stopped():
+@pytest.fixture(autouse=True)
+def cdc_service_must_be_stopped(request):
     """The suite and the long running consumer cannot share the source.
 
     Every test owns its own replication slot, and slots coexist, so that is not
@@ -34,10 +34,15 @@ def cdc_service_must_be_stopped():
     for good, because ADR 0018 says a contract violation stops the consumer and
     the slot's backlog still carries the old shape.
 
-    make test-e2e and make test-chaos stop the service and start it again. This
-    guard exists so that running pytest by hand fails with a sentence instead of
-    with a mystery.
+    Chaos tests are exempt: they assert against a live stack, and the vacuity
+    guard in particular needs the consumer running, because an alert that cannot
+    fire against a healthy system is exactly what it is looking for.
+
+    make test-e2e stops the service and starts it again. This guard exists so
+    that running pytest by hand fails with a sentence instead of a mystery.
     """
+    if request.node.get_closest_marker("chaos"):
+        return
     running = subprocess.run(
         ["docker", "compose", "ps", "--status", "running", "--services"],
         cwd=str(ROOT), capture_output=True, timeout=60,

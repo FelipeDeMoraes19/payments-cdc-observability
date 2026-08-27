@@ -10,3 +10,5 @@ transform/dbt/target/
 transform/dbt/logs/
 transform/dbt/dbt_packages/
 transform/dbt/.user.yml
+observability/terraform/.terraform/
+observability/terraform/terraform.tfstate*

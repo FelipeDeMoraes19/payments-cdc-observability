@@ -46,8 +46,13 @@ def cli():
     bootstrapping the Airflow CLI costs about eleven. Paying that once for six
     commands rather than once per command is where the time actually is; it is
     not in container creation, which is what the obvious guess would have been.
+
+    It migrates the metadata database first. make reset destroys the volume that
+    holds it, which ADR 0019 accepts as what reset means, and db migrate on
+    startup is what makes that self healing. Without this line the suite passes
+    until someone resets, and then fails on something it does not test.
     """
-    script = "airflow dags reserialize\n" + "\n".join(
+    script = "airflow db migrate\nairflow dags reserialize\n" + "\n".join(
         'echo "{} {}"\n{}'.format(MARKER, name, command) for name, command in SECTIONS
     )
     completed = subprocess.run(

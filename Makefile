@@ -1,7 +1,11 @@
-.PHONY: env up down reset seed fx test-chaos runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
+.PHONY: env alerts up down reset seed fx test-chaos runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
 
 env:
 	python scripts/bootstrap_env.py
+
+alerts:
+	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm terraform init -input=false
+	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm terraform apply -auto-approve -input=false
 
 up: env
 	docker compose up -d
@@ -56,9 +60,7 @@ test-e2e:
 	docker compose start cdc
 
 test-chaos:
-	docker compose stop cdc
-	-python -m pytest -m chaos -v
-	docker compose start cdc
+	python -m pytest -m chaos -v
 
 test-all:
 	docker compose stop cdc

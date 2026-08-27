@@ -113,6 +113,22 @@ services:
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
 
+  terraform:
+    image: hashicorp/terraform:1.16
+    profiles: ["jobs"]
+    working_dir: /opt/project/observability/terraform
+    environment:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_grafana_url: http://grafana:3000
+      TF_VAR_grafana_admin_user: ${GRAFANA_ADMIN_USER:-admin}
+      TF_VAR_grafana_admin_password: ${GRAFANA_ADMIN_PASSWORD:-}
+      TF_VAR_postgres_url: postgres:5432
+      TF_VAR_postgres_user: ${GRAFANA_DB_USER:-grafana}
+      TF_VAR_postgres_database: ${POSTGRES_DB:-payments}
+      TF_VAR_postgres_password: ${GRAFANA_DB_PASSWORD:-}
+    volumes:
+      - .:/opt/project
+
   airflow-init:
     image: payments-cdc-runner:3.3.1
     build:
