@@ -118,3 +118,54 @@ que se espera saber defender.
 
 - O `docker compose up` passa a subir o consumidor, que segura o slot continuamente. Quem
   clona precisa saber disso, e vai para o README.
+
+## Os dois alertas são gerenciados pelo Grafana, não pelo Prometheus
+
+Quem abre um repositório com Prometheus espera encontrar regra de alerta do Prometheus.
+Aqui não há, e a escolha é deliberada por duas razões.
+
+**O alerta do WAL retido consulta SQL.** O Prometheus não consulta Postgres; o Grafana
+consulta. Ter um alerta em cada mecanismo significaria manter dois.
+
+**A guarda de vacuidade é a peça central do marco, e ela percorre as regras.** Com um
+mecanismo, é um laço sobre os `grafana_rule_group`. Com dois, ela teria que ler YAML de
+regra do Prometheus **e** a API do Grafana — o dobro do custo na peça que mais importa, sem
+ganho de argumento.
+
+E há um terceiro efeito, que só aparece olhando o ADR 0006: **"No Data = Normal" é conceito
+do Grafana.** No Prometheus, expressão que não casa com nada simplesmente não dispara, sem
+configuração alguma. O alerta cego perderia o segundo mecanismo e ficaria com um só — e são
+os dois mecanismos, cada um defensável sozinho, que fazem ele parecer produção em vez de
+armadilha montada.
+
+**O custo aceito, dito para não passar despercebido:** o Grafana vira ponto único. Se ele
+cai, some o alerta e some o painel de uma vez, enquanto com regras no Prometheus o alerta
+sobreviveria à queda do painel. Num projeto que roda inteiro num `docker compose up`, os
+dois caem juntos de qualquer forma.
+
+## Um achado: passar no healthcheck e estar pronto são coisas diferentes
+
+Ao subir o Grafana, o script `005_grafana_role.sh` falhou por variável ausente. Ele gritou
+no log exatamente a mensagem escrita para esse caso — e **o Postgres reportou `healthy`
+assim mesmo**, sem o papel existir. Alto no log, mudo para o healthcheck.
+
+O healthcheck perguntava "você aceita conexão?". Passou a perguntar "os scripts de init
+terminaram?", conferindo os três papéis e a publication que eles criam.
+
+Consertar a causa e seguir teria sido o suficiente para o sintoma e insuficiente para o
+projeto: o mesmo movimento da guarda de vacuidade se aplica aqui — achou-se uma cegueira,
+então ela vira detector.
+
+**E o detector precisou de duas correções, não uma.** A primeira versão não disparava, e a
+razão não era a consulta:
+
+```
+interval 5s x retries 30  ->  so vira unhealthy apos 150 segundos de falha
+```
+
+`retries` estava alto para tolerar a partida lenta do init, e com isso a detecção **em
+regime** ficou lenta. O botão certo para partida é `start_period`. Com `start_period: 90s`
+e `retries: 3`, o container passa de saudável a `unhealthy` em **20 segundos**, medido.
+
+Um detector configurado com o botão errado é um detector lento, e detector lento é o
+começo de detector cego.

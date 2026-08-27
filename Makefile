@@ -1,4 +1,4 @@
-.PHONY: env up down reset seed fx runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
+.PHONY: env up down reset seed fx test-chaos runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
 
 env:
 	python scripts/bootstrap_env.py
@@ -48,16 +48,21 @@ backfill-fx:
 	MSYS_NO_PATHCONV=1 docker compose --profile orchestration run --rm airflow-init bash -c "airflow backfill create --dag-id fx_daily --from-date $(FROM) --to-date $(TO)"
 
 test:
-	python -m pytest -m 'not e2e' -v
+	python -m pytest -m 'not e2e and not chaos' -v
 
 test-e2e:
 	docker compose stop cdc
 	-python -m pytest -m e2e -v
 	docker compose start cdc
 
+test-chaos:
+	docker compose stop cdc
+	-python -m pytest -m chaos -v
+	docker compose start cdc
+
 test-all:
 	docker compose stop cdc
-	-python -m pytest -v
+	-python -m pytest -m 'not chaos' -v
 	docker compose start cdc
 
 slots:

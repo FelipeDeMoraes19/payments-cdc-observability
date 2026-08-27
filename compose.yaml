@@ -33,10 +33,19 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -U ${POSTGRES_USER:-payments} -d ${POSTGRES_DB:-payments}
+        - >-
+          pg_isready -U ${POSTGRES_USER:-payments} -d ${POSTGRES_DB:-payments}
+          && psql -U ${POSTGRES_USER:-payments} -d ${POSTGRES_DB:-payments} -tAc
+          "SELECT count(*) = 4 FROM (
+             SELECT 1 FROM pg_roles WHERE rolname = '${CDC_USER:-cdc}'
+             UNION ALL SELECT 1 FROM pg_roles WHERE rolname = '${AIRFLOW_DB_USER:-airflow}'
+             UNION ALL SELECT 1 FROM pg_roles WHERE rolname = '${GRAFANA_DB_USER:-grafana}'
+             UNION ALL SELECT 1 FROM pg_publication WHERE pubname = '${CDC_PUBLICATION:-payments_pub}'
+           ) ready" | grep -qx t
+      start_period: 90s
       interval: 5s
-      timeout: 3s
-      retries: 20
+      timeout: 5s
+      retries: 3
 
   runner:
     build:

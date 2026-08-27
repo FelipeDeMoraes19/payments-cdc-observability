@@ -43,12 +43,20 @@ them; the rest are marked *planned* and are not claims yet.
 | Running the whole pipeline twice changes the gold | run ingestion, silver and dbt twice over the same source | nothing should change; every model is a deterministic function of the data, with no execution clock anywhere | **Yes** — `tests/test_gold_determinism.py` |
 | The size of the consumer's batch leaks into the result | two slots created before any change, one drained in a single batch and one a record at a time | nothing should differ; batch size may change the file layout but never the data | **Yes** — `tests/test_batch_decomposition.py` |
 | Extracting a window differs from extracting its days | fetch the 1st to the 7th in one call, and again as seven single day calls | nothing should differ, because a window rewrites its whole month | **Yes** — `tests/test_fx_extractor.py` |
+| An init script fails and the database comes up incomplete | drop an artifact the init scripts create, standing in for the script that failed to create it | the healthcheck, which asks whether the init finished rather than whether the port answers | **Yes** — `tests/test_healthcheck_detects_incomplete_init.py` |
 | A replication slot is left without a consumer | `make chaos-orphan-slot` | a Grafana alert on the WAL the slot retains | *Planned, Milestone 3* |
 | Data arrives late | `make chaos-late` | a dbt freshness test | *Planned, Milestone 3* |
 | A day of exchange rates is missing | `make chaos-fx-gap` | a `not_null` test on `amount_brl` | *Planned, Milestone 3* |
 | PII reaches the gold layer | `make chaos-pii` | a custom test for CPF patterns in gold | *Planned, Milestone 3* |
 | Nothing is being ingested at all | `make chaos-empty` | a heartbeat alert in Grafana | *Planned, Milestone 3* |
 | **A blind alert** | `make chaos-blind` | **nothing — the alert cannot fire** | *Planned, Milestone 3* — **and it will stay "no", on purpose** |
+
+One row is worth reading twice, because it needed no knowledge of this project to find.
+**Passing a healthcheck and being ready for use are different things.** An init script here
+failed loudly in the logs, the database kept accepting connections, and the healthcheck
+said healthy while a role it was supposed to create did not exist. The healthcheck now
+asks whether the init finished. Finding a blind spot and turning it into a detector is the
+same move as the vacuity guard below, and it is the move this repository is about.
 
 One row deserves its reasoning in the open. When a change violates the schema contract,
 the consumer stops and stays stopped, and reverting the column at the source does not
