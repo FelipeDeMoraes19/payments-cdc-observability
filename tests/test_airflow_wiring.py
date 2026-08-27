@@ -1,3 +1,4 @@
+import re
 import subprocess
 from pathlib import Path
 
@@ -27,12 +28,12 @@ SECTIONS = (
     (
         "backfill_week",
         "airflow backfill create --dag-id fx_daily "
-        "--from-date 2026-08-17 --to-date 2026-08-23 --dry-run",
+        "--from-date 2026-08-17 --to-date 2026-08-24 --dry-run",
     ),
     (
         "backfill_pair",
         "airflow backfill create --dag-id fx_daily "
-        "--from-date 2026-08-17 --to-date 2026-08-18 --dry-run",
+        "--from-date 2026-08-17 --to-date 2026-08-19 --dry-run",
     ),
 )
 
@@ -88,18 +89,29 @@ def test_the_extractor_receives_the_date_of_its_own_interval(cli):
     )
 
 
-def test_backfill_proposes_one_run_for_each_day_in_the_window(cli):
-    week = cli["backfill_week"]
-    proposed = {
-        "2026-08-{:02d}".format(day)
-        for day in range(17, 24)
-        if "2026-08-{:02d}".format(day) in week
-    }
-    assert proposed == {
+def proposed_runs(output: str) -> list:
+    """The logical dates in the table, not every date printed anywhere.
+
+    An earlier version searched the whole output, which also contains the echoed
+    --to-date parameter. It asserted seven runs and passed while the command
+    actually proposed six, because the seventh date appeared only in the
+    parameter listing. Reading the table alone is what makes the assertion mean
+    what it says.
+    """
+    marker = "Runs to be attempted"
+    assert marker in output, "the dry run printed no table of runs: {}".format(output)
+    table = output[output.index(marker):]
+    return sorted(set(re.findall(r"\d{4}-\d{2}-\d{2}(?= \d{2}:\d{2})", table)))
+
+
+def test_backfill_proposes_one_run_for_each_scheduled_time_in_the_window(cli):
+    week = proposed_runs(cli["backfill_week"])
+    assert week == [
         "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20",
         "2026-08-21", "2026-08-22", "2026-08-23",
-    }, "backfill did not propose exactly the seven days of the window:\n{}".format(week)
+    ], "backfill proposed {}".format(week)
 
-    assert "2026-08-19" not in cli["backfill_pair"], (
-        "a two day window proposed a day outside it, so the window is not respected"
+    pair = proposed_runs(cli["backfill_pair"])
+    assert pair == ["2026-08-17", "2026-08-18"], (
+        "a narrow window proposed {} instead of its own two days".format(pair)
     )

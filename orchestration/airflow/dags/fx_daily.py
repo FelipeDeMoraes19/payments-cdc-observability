@@ -4,6 +4,7 @@ from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import DAG
 
 PROJECT = "/opt/project"
+TRADING_DATE = "{{ (data_interval_start | default(dag_run.run_after, true)) | ds }}"
 
 with DAG(
     dag_id="fx_daily",
@@ -19,8 +20,8 @@ with DAG(
         cwd=PROJECT,
         env={
             "PYTHONPATH": PROJECT,
-            "FX_START_DATE": "{{ data_interval_start | ds }}",
-            "FX_END_DATE": "{{ data_interval_start | ds }}",
+            "FX_START_DATE": TRADING_DATE,
+            "FX_END_DATE": TRADING_DATE,
         },
         append_env=True,
         bash_command="python -m ingestion.batch.bcb_fx",
