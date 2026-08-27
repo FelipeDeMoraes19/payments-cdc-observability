@@ -1,4 +1,4 @@
-.PHONY: up down reset seed cdc fx runner-build silver runner-shell gold docs test test-e2e test-all slots
+.PHONY: up down reset seed cdc fx runner-build silver runner-shell gold docs airflow airflow-down backfill-fx test test-e2e test-all slots
 
 up:
 	docker compose up -d
@@ -36,6 +36,15 @@ docs:
 	cp transform/dbt/target/index.html docs/index.html
 	cp transform/dbt/target/manifest.json docs/manifest.json
 	cp transform/dbt/target/catalog.json docs/catalog.json
+
+airflow:
+	docker compose --profile orchestration up -d
+
+airflow-down:
+	docker compose --profile orchestration down
+
+backfill-fx:
+	MSYS_NO_PATHCONV=1 docker compose --profile orchestration run --rm airflow-init bash -c "airflow backfill create --dag-id fx_daily --from-date $(FROM) --to-date $(TO)"
 
 test:
 	python -m pytest -m 'not e2e' -v

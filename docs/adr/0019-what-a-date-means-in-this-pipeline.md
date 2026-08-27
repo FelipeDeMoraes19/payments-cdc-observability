@@ -101,6 +101,38 @@ depois.
 O teste do BCB invoca o **backfill explícito**, não o agendador, porque tem que exercitar o
 mesmo caminho que o README demonstra.
 
+## Onde os metadados do Airflow moram
+
+O Airflow precisa de banco de metadados. **SQLite foi eliminado por um fato, não por
+preferência**, e o fato só apareceu porque foi verificado dentro da própria imagem:
+
+```
+from airflow.executors.sequential_executor import SequentialExecutor
+  -> ModuleNotFoundError: No module named 'airflow.executors.sequential_executor'
+
+executores em 3.3.1 -> ['CeleryExecutor', 'KubernetesExecutor', 'LocalExecutor']
+core.executor (default) -> LocalExecutor
+```
+
+O `SequentialExecutor` **não existe mais na linha 3**. Os que restam rodam tarefas em
+paralelo e exigem banco com escrita concorrente, o que o SQLite não oferece. A opção mais
+simples deixou de estar disponível.
+
+**Decisão: o mesmo container Postgres, num banco separado**, com papel próprio criado no
+`db/init`. Não adiciona serviço ao `compose up`, e é o arranjo que qualquer deploy real
+usa — SQLite num repositório de portfólio se lê como desconhecimento do arranjo de
+produção, a menos que um documento diga o contrário, e aqui nem é possível.
+
+Rejeitado: **um segundo Postgres só para os metadados**. Separação mais limpa e um serviço
+a mais para quem só quer ver o projeto rodar.
+
+**Consequência aceita: `make reset` leva junto o histórico de execuções das DAGs**, porque
+destrói o volume que agora hospeda os dois bancos. Isso é o que "reset" significa, e o
+`airflow db migrate` roda na subida — idempotente — então o Airflow reconstrói o próprio
+schema sozinho depois. A alternativa seria um reset seletivo que recria só o banco
+`payments` e reaplica o `db/init` por fora, criando **dois caminhos de inicialização de
+schema** — a mesma bifurcação rejeitada no ADR 0015.
+
 ## Consequências
 
 - `catchup=False` nas duas é **declaração deliberada**, não esquecimento. Registrado aqui

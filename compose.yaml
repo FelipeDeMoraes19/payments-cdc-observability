@@ -20,6 +20,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-payments}
       CDC_USER: ${CDC_USER:?copy .env.example to .env before starting the stack}
       CDC_PASSWORD: ${CDC_PASSWORD:?copy .env.example to .env before starting the stack}
+      AIRFLOW_DB_USER: ${AIRFLOW_DB_USER:-airflow}
+      AIRFLOW_DB_NAME: ${AIRFLOW_DB_NAME:-airflow}
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD:?copy .env.example to .env before starting the stack}
     ports:
       - "${POSTGRES_PORT:-5434}:5432"
     volumes:
@@ -46,6 +49,74 @@ services:
       SPARK_MASTER: ${SPARK_MASTER:-local[*]}
     volumes:
       - .:/opt/project
+
+  airflow-init:
+    image: payments-cdc-runner:3.3.1
+    build:
+      context: .
+      dockerfile: docker/runner.Dockerfile
+    profiles: ["orchestration"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &airflow_environment
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/project/orchestration/airflow/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+        postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:-}@postgres:5432/${AIRFLOW_DB_NAME:-airflow}
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-}
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      PYTHONPATH: /opt/project
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-payments}
+      POSTGRES_USER: ${POSTGRES_USER:-payments}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payments}
+      CDC_USER: ${CDC_USER:-cdc}
+      CDC_PASSWORD: ${CDC_PASSWORD:-}
+      PII_HMAC_KEY: ${PII_HMAC_KEY:-}
+    volumes:
+      - .:/opt/project
+    command: ["bash", "-c", "airflow db migrate"]
+
+  airflow-scheduler:
+    image: payments-cdc-runner:3.3.1
+    profiles: ["orchestration"]
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow_environment
+    volumes:
+      - .:/opt/project
+    command: ["scheduler"]
+    restart: unless-stopped
+
+  airflow-dag-processor:
+    image: payments-cdc-runner:3.3.1
+    profiles: ["orchestration"]
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow_environment
+    volumes:
+      - .:/opt/project
+    command: ["dag-processor"]
+    restart: unless-stopped
+
+  airflow-apiserver:
+    image: payments-cdc-runner:3.3.1
+    profiles: ["orchestration"]
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow_environment
+    ports:
+      - "${AIRFLOW_PORT:-8082}:8080"
+    volumes:
+      - .:/opt/project
+    command: ["api-server"]
+    restart: unless-stopped
 
 volumes:
   pgdata:
