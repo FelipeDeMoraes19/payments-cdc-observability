@@ -5,11 +5,12 @@ A data platform that fits in a `docker compose up` and hides none of the boring 
 **[Browse the data model, its lineage and its tests](https://felipedemoraes19.github.io/payments-cdc-observability/)** — the
 `dbt docs` site, served straight from this repository. Nothing to clone or run.
 
-> **Status:** Milestone 1 is complete and the silver layer of Milestone 2 is built. Both
-> sources land in bronze with schema contracts enforced at the boundary, and Spark turns
-> the change log into a typed, masked silver. The dimensional model in dbt and the Airflow
-> orchestration are next. This README grows with the project; rows and sections marked
-> *planned* are not built yet.
+> **Status:** Milestones 1 and 2 are complete. Both sources land in bronze under schema
+> contracts, Spark turns the change log into a typed and masked silver, dbt builds the
+> dimensional model with `dim_customer` as a Type 2 dimension, and two Airflow DAGs
+> orchestrate it. Milestone 3 — observability, the chaos suite and the alert that cannot
+> fire — is next. This README grows with the project; rows and sections marked *planned*
+> are not built yet.
 
 Most portfolio data projects prove the happy path: call an API, load, transform, show a
 dashboard. This one is about the parts that production demands and portfolios skip —
@@ -40,6 +41,8 @@ them; the rest are marked *planned* and are not claims yet.
 | A value in bronze cannot be typed | a bronze file written outside the ingestion path | silver refuses to run, naming the column, the observed value and the expected type | **Yes** — `tests/test_silver.py` |
 | Reverting a schema change does not unblock the stream | change a column type, let the consumer stop, then revert the column | nothing automatic: the slot's backlog still carries the old shape, so the consumer stays stopped until someone decides what to do with it | **Yes, it stays stopped** — deliberately; recovery is a human decision (ADR 0018) |
 | Running the whole pipeline twice changes the gold | run ingestion, silver and dbt twice over the same source | nothing should change; every model is a deterministic function of the data, with no execution clock anywhere | **Yes** — `tests/test_gold_determinism.py` |
+| The size of the consumer's batch leaks into the result | two slots created before any change, one drained in a single batch and one a record at a time | nothing should differ; batch size may change the file layout but never the data | **Yes** — `tests/test_batch_decomposition.py` |
+| Extracting a window differs from extracting its days | fetch the 1st to the 7th in one call, and again as seven single day calls | nothing should differ, because a window rewrites its whole month | **Yes** — `tests/test_fx_extractor.py` |
 | A replication slot is left without a consumer | `make chaos-orphan-slot` | a Grafana alert on the WAL the slot retains | *Planned, Milestone 3* |
 | Data arrives late | `make chaos-late` | a dbt freshness test | *Planned, Milestone 3* |
 | A day of exchange rates is missing | `make chaos-fx-gap` | a `not_null` test on `amount_brl` | *Planned, Milestone 3* |
@@ -204,6 +207,8 @@ Milestone 2 turns this into a modelled `fct_payment` with dbt. The `LEFT JOIN` a
 amount and loses its conversion, which is exactly the hole a `not_null` test on
 `amount_brl` is meant to find.
 
+## Running it, stage by stage
+
 ### Exchange rates
 
 ```
@@ -299,6 +304,63 @@ make reset
 
 This drops the database, its data, and every replication slot. There is no in-place
 migration path by design: the OLTP here is a synthetic fixture, not something to preserve.
+
+## Orchestration
+
+```
+make airflow                              # http://localhost:8082
+make backfill-fx FROM=2026-08-17 TO=2026-08-23
+```
+
+There are **two DAGs, not one**, and the reason is the most interesting decision of this
+milestone.
+
+`data_interval` is a promise that a run corresponds to a slice of time. It is a contract,
+not decoration. The exchange rate extractor can keep that promise: a quote belongs to a
+day, so "run it for the 12th" means something and backfilling a week is a real operation.
+The change stream cannot: you never ask Postgres for "the changes of the 12th", you ask
+for "whatever is after LSN N". A commit timestamp is an attribute of a change, not a
+handle you can seek by, and a replication slot has one position rather than a calendar.
+
+Putting both in one DAG would make `data_interval` true for half of it and a lie for the
+other half. The lie is operational, not aesthetic: someone clears an old run expecting to
+reprocess that day, and the CDC drains the present instead.
+
+So `fx_daily` is date partitioned and backfillable, and `cdc_to_gold` is position based
+and is not. Both have `catchup=False`, which is a deliberate declaration rather than an
+oversight: in Airflow 3 that is already the default, and backfill became an explicit
+command instead of a side effect of activating a DAG. A command you can demonstrate beats
+a side effect you have to explain.
+
+**They are not coupled, and that is also deliberate.** Gold can run before the day's rate
+exists. Making it wait would trade a visible failure for an invisible one — a null
+`amount_brl` that a `not_null` test points at, replaced by a DAG that simply never ran.
+And a day without a quote is *normal*: weekends and holidays have no PTAX, so anything
+waiting for one would wait forever every Saturday.
+
+### The acceptance criterion this milestone changed
+
+The plan said: *a seven day backfill must give the same result as running day by day.* That
+sentence was written before the architecture existed, and on this architecture it would
+have become **vacuous** — silver and gold rebuild from bronze, so nothing downstream reads
+the date parameter, and the test would have passed even with the pipeline broken.
+
+The question underneath backfill is not about dates. It is **compositionality**: does
+processing an interval give the same result as processing its parts? That question
+survives; only the unit changes, to the one each half can actually measure.
+
+| Half | Unit | What is asserted |
+|---|---|---|
+| Exchange rates | date | one call for the 1st to the 7th leaves what seven single day calls leave |
+| Change stream | batch | draining in many small batches leaves the same bronze, silver and gold as draining in one |
+
+Neither passes by accident. Each refuses to run if its own setup was degenerate — the
+window test fails if every observation landed on one day, and the batch test fails if both
+drains happened to produce the same number of files, which would mean the batch size never
+differed at all.
+
+The criterion was **translated, not shrunk**. That distinction is the point: an acceptance
+criterion that quietly becomes trivially true is worse than one that fails honestly.
 
 ## Decision records
 
