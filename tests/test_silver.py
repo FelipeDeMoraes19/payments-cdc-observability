@@ -31,9 +31,9 @@ def run_spark(bronze_root: Path, silver_root: Path):
             "docker", "compose", "--profile", "jobs", "run", "--rm",
             "-e", "CDC_BRONZE_ROOT={}".format(bronze_root.relative_to(ROOT).as_posix()),
             "-e", "SILVER_ROOT={}".format(silver_root.relative_to(ROOT).as_posix()),
-            "spark",
-            "/opt/spark/bin/spark-submit", "--master", "local[*]",
-            "transform/spark/bronze_to_silver.py",
+            "runner",
+            "bash", "-c",
+            "spark-submit --master 'local[*]' transform/spark/bronze_to_silver.py",
         ],
         cwd=str(ROOT),
         capture_output=True,
@@ -63,6 +63,8 @@ def scenario(postgres, reset_source, drop_slot, request):
     reset_source(slot)
     shutil.rmtree(bronze, ignore_errors=True)
     shutil.rmtree(silver, ignore_errors=True)
+    bronze.mkdir(parents=True, exist_ok=True)
+    silver.mkdir(parents=True, exist_ok=True)
     yield postgres, slot, bronze, silver
     drop_slot(slot)
 

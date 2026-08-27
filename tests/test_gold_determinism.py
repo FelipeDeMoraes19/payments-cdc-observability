@@ -30,6 +30,7 @@ def pipeline(postgres, reset_source, drop_slot):
     reset_source(SLOT)
     for path in (BRONZE, SILVER):
         shutil.rmtree(path, ignore_errors=True)
+        path.mkdir(parents=True, exist_ok=True)
     GOLD.parent.mkdir(parents=True, exist_ok=True)
     if GOLD.exists():
         GOLD.unlink()
@@ -43,9 +44,9 @@ def run_silver() -> None:
             "docker", "compose", "--profile", "jobs", "run", "--rm",
             "-e", "CDC_BRONZE_ROOT={}".format(BRONZE.relative_to(ROOT).as_posix()),
             "-e", "SILVER_ROOT={}".format(SILVER.relative_to(ROOT).as_posix()),
-            "spark",
-            "/opt/spark/bin/spark-submit", "--master", "local[*]",
-            "transform/spark/bronze_to_silver.py",
+            "runner",
+            "bash", "-c",
+            "spark-submit --master 'local[*]' transform/spark/bronze_to_silver.py",
         ],
         cwd=str(ROOT), capture_output=True, timeout=STEP_TIMEOUT_SECONDS,
     )

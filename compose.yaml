@@ -33,19 +33,19 @@ services:
       timeout: 3s
       retries: 20
 
-  spark:
+  runner:
     build:
       context: .
-      dockerfile: transform/spark/Dockerfile
-    image: payments-cdc-spark:4.2.0
+      dockerfile: docker/runner.Dockerfile
+    image: payments-cdc-runner:3.3.1
     profiles: ["jobs"]
-    working_dir: /workspace
+    working_dir: /opt/project
     environment:
-      PYTHONPATH: /workspace
+      PYTHONPATH: /opt/project
       PII_HMAC_KEY: ${PII_HMAC_KEY:-}
       SPARK_MASTER: ${SPARK_MASTER:-local[*]}
     volumes:
-      - .:/workspace
+      - .:/opt/project
 
 volumes:
   pgdata:

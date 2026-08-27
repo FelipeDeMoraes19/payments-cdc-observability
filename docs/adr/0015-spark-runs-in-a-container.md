@@ -42,6 +42,21 @@ do autor.**
 O job é batch, não serviço: sobe com `docker compose run --rm`, e o serviço fica atrás de
 um profile para não subir junto no `docker compose up`.
 
+### Duas armadilhas da imagem do Airflow, medidas na consolidação
+
+**O entrypoint trata o primeiro argumento como subcomando do `airflow`.** Rodar
+`docker compose run runner spark-submit ...` produz
+`airflow command error: argument GROUP_OR_COMMAND: invalid choice: 'spark-submit'`. O
+entrypoint tem caso especial para `bash`, então toda tarefa é invocada como
+`bash -c "..."`. Vale para o `make silver`, para os testes e para as tarefas da DAG.
+
+**A troca de imagem trocou o uid, e diretório antigo ficou ilegível.** A imagem
+`apache/spark` roda como uid 185; a do Airflow, como 50000. Diretórios de dados criados
+pela imagem anterior ficaram `drwxr-xr-x 185:185` e o novo usuário não conseguia escrever
+neles — `Mkdirs failed to create`. O conserto não foi apagar e seguir: os fixtures de teste
+passaram a **criar as raízes pelo host**, onde o bind mount as expõe com permissão
+permissiva. Apagar resolveria hoje e voltaria na próxima troca de imagem.
+
 ## Alternativas rejeitadas
 
 **PySpark local no Windows.** Medido em 2026-08-26 nesta máquina:
@@ -109,5 +124,5 @@ primeira pergunta sobre volume.
   alvo de shell interativo, para experimentar dentro do container.
 - O código do job precisa ser importável de dentro do container, então o repositório é
   montado como volume e `contracts/` é importado de lá.
-- A imagem carrega Java 21 e pesa centenas de megabytes. É custo de disco, pago uma vez.
+- A imagem carrega Java 17 e pesa centenas de megabytes. É custo de disco, pago uma vez.
 - Quem clona não instala Java, Spark nem `winutils`. Só Docker.

@@ -1,4 +1,4 @@
-.PHONY: up down reset seed cdc fx spark-build silver spark-shell gold docs test test-e2e test-all slots
+.PHONY: up down reset seed cdc fx runner-build silver runner-shell gold docs test test-e2e test-all slots
 
 up:
 	docker compose up -d
@@ -19,14 +19,14 @@ cdc:
 fx:
 	python -m ingestion.batch.bcb_fx
 
-spark-build:
-	docker compose --profile jobs build spark
+runner-build:
+	docker compose --profile jobs build runner
 
 silver:
-	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm spark /opt/spark/bin/spark-submit --master 'local[*]' transform/spark/bronze_to_silver.py
+	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm runner bash -c "spark-submit --master 'local[*]' transform/spark/bronze_to_silver.py"
 
-spark-shell:
-	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm spark /opt/spark/bin/pyspark --master 'local[*]'
+runner-shell:
+	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm runner bash
 
 gold:
 	cd transform/dbt && DBT_PROFILES_DIR=. dbt build
