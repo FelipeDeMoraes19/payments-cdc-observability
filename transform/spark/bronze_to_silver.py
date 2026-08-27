@@ -56,29 +56,31 @@ def spark_type(column: ColumnContract):
     return SPARK_TYPES[column.type_name]
 
 
-def assert_castable(frame, contract: TableContract, column: ColumnContract) -> None:
-    target = spark_type(column).simpleString()
-    source = "raw_{}".format(column.name)
-    offenders = (
-        frame.select(F.col(source).alias("observed"))
-        .where(
+def assert_castable(frame, contract: TableContract) -> None:
+    probes = []
+    for column in contract.columns:
+        source = "raw_{}".format(column.name)
+        target = spark_type(column).simpleString()
+        offending = F.when(
             F.col(source).isNotNull()
-            & F.expr("try_cast(`{}` as {})".format(source, target)).isNull()
+            & F.expr("try_cast(`{}` as {})".format(source, target)).isNull(),
+            F.col(source),
         )
-        .limit(1)
-        .collect()
-    )
-    if offenders:
-        raise SilverError(
-            "column {}.{} carries {!r}, which is not a valid {}; the contract declares "
-            "it as postgres {}".format(
-                contract.qualified_name,
-                column.name,
-                offenders[0]["observed"],
-                target,
-                column.type_name,
+        probes.append(F.first(offending, ignorenulls=True).alias(column.name))
+    found = frame.agg(*probes).collect()[0]
+    for column in contract.columns:
+        observed = found[column.name]
+        if observed is not None:
+            raise SilverError(
+                "column {}.{} carries {!r}, which is not a valid {}; the contract "
+                "declares it as postgres {}".format(
+                    contract.qualified_name,
+                    column.name,
+                    observed,
+                    spark_type(column).simpleString(),
+                    column.type_name,
+                )
             )
-        )
 
 
 def cleaned_history(frame, contract: TableContract):
@@ -123,8 +125,7 @@ def apply_truncates(rows, truncates):
 
 def build_silver(frame, contract: TableContract, mask):
     rows = cleaned_history(frame.where(F.col("action") != "truncate"), contract)
-    for column in contract.columns:
-        assert_castable(rows, contract, column)
+    assert_castable(rows, contract)
     silver = apply_truncates(rows, frame.where(F.col("action") == "truncate"))
     for column in contract.columns:
         source = F.col("raw_{}".format(column.name))
