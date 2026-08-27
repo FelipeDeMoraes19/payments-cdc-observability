@@ -82,11 +82,35 @@ services:
       CDC_IDLE_TIMEOUT: "0"
       CDC_METRICS: "1"
       CDC_METRICS_PORT: "9108"
+      CDC_BATCH_MAX_SECONDS: "60"
     ports:
       - "${CDC_METRICS_PORT:-9108}:9108"
     volumes:
       - .:/opt/project
     command: ["bash", "-c", "python -m ingestion.cdc.consumer"]
+    restart: "no"
+
+  generator:
+    image: payments-cdc-runner:3.3.1
+    build:
+      context: .
+      dockerfile: docker/runner.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /opt/project
+    environment:
+      PYTHONPATH: /opt/project
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-payments}
+      POSTGRES_USER: ${POSTGRES_USER:-payments}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payments}
+      GEN_DURATION_SECONDS: "0"
+      GEN_RATE_PER_SECOND: ${GEN_RATE_PER_SECOND:-0.5}
+    volumes:
+      - .:/opt/project
+    command: ["bash", "-c", "python -m generator.synthetic_load"]
     restart: "no"
 
   prometheus:

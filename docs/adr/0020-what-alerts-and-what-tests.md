@@ -169,3 +169,44 @@ e `retries: 3`, o container passa de saudável a `unhealthy` em **20 segundos**,
 
 Um detector configurado com o botão errado é um detector lento, e detector lento é o
 começo de detector cego.
+
+## Onde a senha vive decide se ela é persistida
+
+Medido depois do primeiro `terraform apply`, contra o `terraform.tfstate` gerado:
+
+```
+GRAFANA_ADMIN_PASSWORD  em texto puro no tfstate: False
+GRAFANA_DB_PASSWORD     em texto puro no tfstate: True
+```
+
+A regra transferível, que vale além deste projeto:
+
+> **Credencial de provedor não é persistida no estado; atributo de recurso é.**
+
+A senha de admin do Grafana só autentica o provedor e desaparece; a senha do datasource é
+atributo de um recurso e fica gravada. `sensitive = true` não muda nada disso — ele suprime
+a impressão no terminal, não a escrita no estado. Quem confia na marcação para proteger
+segredo está protegendo a metade errada.
+
+Por isso `terraform.tfstate*` está no `.gitignore` e o `.terraform.lock.hcl` **não** está:
+o estado carrega segredo, o lock carrega os hashes do provedor e é justamente o que se quer
+versionado. O próprio Terraform avisa disso no `init`, e eu tinha ignorado o arquivo errado
+antes de ler o aviso.
+
+## Um padrão que só aparece no conjunto
+
+Três defeitos deste marco — o consumidor como tarefa de lote, o healthcheck com `retries` no
+lugar de `start_period`, e o gerador sob demanda — **não foram defeitos na lógica de
+detecção**. Os três foram a mesma suposição errada sobre **qual é o normal contra o qual o
+detector mede**.
+
+Escolher limiar é a metade fácil de um alerta. A metade difícil é acertar como é o normal, e
+essa resposta mora em decisões de arquitetura tomadas muito antes de alguém abrir a tela de
+alertas: de quanto em quanto tempo um processo roda, quanto tempo ele vive, se há alguém
+produzindo. Um alerta pode ficar cego por causa de uma escolha de agendamento que ninguém
+associou a alertas.
+
+O ADR 0006 mostra um alerta cego construído de propósito. Este parágrafo registra que o
+projeto encontrou três por acidente antes disso, e que eles não se pareciam com alertas
+cegos enquanto não foram vistos juntos. Está no README como seção própria, porque é o
+achado mais forte do marco e não cabe em nenhum ADR isolado.

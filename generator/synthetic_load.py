@@ -53,12 +53,19 @@ def ensure_dimensions(connection, customer_target: int, merchant_target: int) ->
 
 
 def run(connection, customers, merchants, duration: float, rate: float, rng) -> tuple:
+    """A duration of zero runs until the process is stopped.
+
+    That is how it runs as a service. The heartbeat alert compares against a
+    baseline, and a generator that only runs when somebody types make seed makes
+    that baseline zero almost always: the alert would fire permanently, which is
+    as useless as never firing.
+    """
     interval = 1.0 / rate if rate > 0 else 0.0
-    deadline = time.monotonic() + duration
+    deadline = None if duration <= 0 else time.monotonic() + duration
     recent = []
     inserted = 0
     updated = 0
-    while time.monotonic() < deadline:
+    while deadline is None or time.monotonic() < deadline:
         with connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO payments (customer_id, merchant_id, amount, currency, status) "

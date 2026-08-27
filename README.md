@@ -106,9 +106,16 @@ pipeline instead of quietly reshaping the data.
 
 ```
 make up
+make alerts
 ```
 
-That is the whole thing. It generates `.env` on first run, replacing the placeholders in
+The first brings up the stack. The second provisions the dashboards and alert rules with
+Terraform, in a container, so nothing about Terraform is installed on your machine either.
+They are two commands rather than one because provisioning alerts is an operation, not a
+demonstration, and putting Terraform in the startup path trades a simple promise for a
+larger and more brittle one.
+
+`make up` alone is the whole stack. It generates `.env` on first run, replacing the placeholders in
 `.env.example` with random secrets, and brings up Postgres and the CDC consumer. Nothing
 real is ever committed, and a fresh clone does not need a file that only exists on someone
 else's machine.
@@ -142,7 +149,14 @@ local instance.
 ## The consumer is a service, and that is not streaming
 
 The CDC consumer runs continuously, as a container that `docker compose up` starts. It
-holds the replication slot, writes bronze, and exports two metrics on `:9108/metrics`.
+holds the replication slot, writes bronze, and exports two metrics on `:9108/metrics`. A
+synthetic load generator runs continuously beside it, at a deliberately low rate.
+
+**Both are writing while you read this.** The generator inserts about one payment every two
+seconds, configurable with `GEN_RATE_PER_SECOND`, which is roughly 1800 rows an hour. Left
+running overnight it grows the database by tens of thousands of rows and the bronze by
+about sixty small files an hour. Stop them with `docker compose stop cdc generator` when
+you are done looking.
 
 **This does not move the scope fence.** The project rules out real streaming, and a long
 running consumer is not stream processing: it reads the write ahead log and writes files.
@@ -161,6 +175,40 @@ as alerting it would have screamed continuously. ADR 0019 has the numbers.
 per model in `run_results.json`. Exporting it to Prometheus would need a Pushgateway for
 the batch steps, adding a service to feed a number no alert reads. The orchestrator already
 measures it; this does not duplicate it.
+
+## Three bugs that were the same bug
+
+The observability milestone found three defects, and none of them was in the detection
+logic. All three were the same mistake wearing different clothes: **a wrong assumption
+about the normal that the detector measures against.**
+
+**The consumer was an Airflow task.** A heartbeat alert reads a counter over a window. The
+consumer lived 25 seconds out of every 900 and its counter restarted from zero on every
+run, so the series existed 2.8% of the time. The alert would have been useless in both
+directions at once: blind if missing data counted as normal, screaming if it counted as
+alerting. The consumer is now a service.
+
+**The healthcheck used `retries` where it needed `start_period`.** Thirty retries at five
+seconds was there to tolerate a slow database init. It also meant a *running* database took
+150 seconds of continuous failure before Docker would call it unhealthy. The detector was
+not wrong, it was slow, and a slow detector is where a blind one starts. With
+`start_period` for startup and three retries for steady state, the flip takes 20 seconds.
+
+**The generator ran on demand.** `sum(increase(cdc_records_written_total[10m]))` compares
+against a baseline. With load arriving only when somebody typed `make seed`, that baseline
+was zero almost always and the alert would have fired permanently. The generator is now a
+service too, at a low rate, which is what gives "it stopped" something to mean.
+
+The pattern is worth more than the three fixes. Choosing a threshold is the easy half of an
+alert. **The hard half is being right about what normal looks like**, and that answer lives
+in architecture decisions made long before anyone opens the alerting page — how often a
+process runs, how long it lives, whether anything is producing at all. An alert can be
+blind because of a scheduling choice nobody connected to alerting.
+
+That is also why this repository keeps a deliberately blind alert and a guard that hunts
+for blind ones. The guard is in `tests/test_alerts_can_fire.py`, it asserts the rule count
+before inspecting anything, and it detects blindness by empty series — not blindness by
+unreachable threshold, which is a second kind it does not cover.
 
 ## Querying the bronze
 

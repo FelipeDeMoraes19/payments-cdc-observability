@@ -55,17 +55,17 @@ test:
 	python -m pytest -m 'not e2e and not chaos' -v
 
 test-e2e:
-	docker compose stop cdc
+	docker compose stop cdc generator
 	-python -m pytest -m e2e -v
-	docker compose start cdc
+	docker compose start cdc generator
 
 test-chaos:
 	python -m pytest -m chaos -v
 
 test-all:
-	docker compose stop cdc
+	docker compose stop cdc generator
 	-python -m pytest -m 'not chaos' -v
-	docker compose start cdc
+	docker compose start cdc generator
 
 slots:
 	docker compose exec -T postgres psql -U $${POSTGRES_USER:-payments} -d $${POSTGRES_DB:-payments} -c "SELECT slot_name, active, restart_lsn, confirmed_flush_lsn, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained_wal FROM pg_replication_slots ORDER BY slot_name;"

@@ -24,8 +24,8 @@ def source_params() -> dict:
 
 
 @pytest.fixture(autouse=True)
-def cdc_service_must_be_stopped(request):
-    """The suite and the long running consumer cannot share the source.
+def source_writers_must_be_stopped(request):
+    """The suite and the long running services cannot share the source.
 
     Every test owns its own replication slot, and slots coexist, so that is not
     the problem. The problem is the tables: fixtures delete every row, and the
@@ -47,10 +47,11 @@ def cdc_service_must_be_stopped(request):
         ["docker", "compose", "ps", "--status", "running", "--services"],
         cwd=str(ROOT), capture_output=True, timeout=60,
     ).stdout.decode("utf-8", "replace").split()
-    assert "cdc" not in running, (
-        "the cdc service is running and would fight this suite for the source "
-        "tables; stop it with 'docker compose stop cdc', or use make test-e2e "
-        "which does it for you"
+    live = sorted({"cdc", "generator"} & set(running))
+    assert not live, (
+        "these services are running and would fight this suite for the source "
+        "tables: {}; stop them with 'docker compose stop cdc generator', or use "
+        "make test-e2e which does it for you".format(live)
     )
 
 
