@@ -20,7 +20,15 @@ models:
       - name: email
         description: Masked the same way as cpf.
       - name: valid_from
-        description: Commit time of the change that created this version.
+        description: >
+          Commit time of the change that created this version, except for the
+          first version of each customer, which opens at 1900-01-01. CDC captures
+          change and not state, so the first change seen is not when the customer
+          started existing; a payment older than it would otherwise join to
+          nothing. first_seen_at keeps the real commit time.
+        data_tests: [not_null]
+      - name: first_seen_at
+        description: Commit time of the change that created this version, unadjusted.
         data_tests: [not_null]
       - name: valid_to
         description: Commit time of the next version, or null while this one is current.

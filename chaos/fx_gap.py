@@ -16,8 +16,8 @@ def main() -> int:
     victim = months[-1]
     shutil.rmtree(victim)
     print(
-        "removed {}\nrebuild gold and amount_brl goes null for payments on those days, "
-        "which the not_null test on amount_brl is there to catch".format(
+        "removed {}\nrebuild gold with make gold: fx_covers_the_payments fails, "
+        "because the quotes no longer reach the days payments were made on".format(
             victim.relative_to(ROOT)
         ),
         file=sys.stderr,

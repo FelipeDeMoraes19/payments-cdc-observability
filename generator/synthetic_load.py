@@ -115,6 +115,12 @@ def run(connection, customers, merchants, duration: float, rate: float, rng, lat
                     (".", rng.choice(customers)),
                 )
                 updated += 1
+            if rng.random() < 0.05:
+                cursor.execute(
+                    "UPDATE merchants SET updated_at = now() WHERE merchant_id = %s",
+                    (rng.choice(merchants),),
+                )
+                updated += 1
         connection.commit()
         time.sleep(interval)
     return inserted, updated
