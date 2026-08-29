@@ -59,3 +59,29 @@ sem aviso claro. O `.env` é lido pelo Compose e pelo consumidor com o mesmo arq
 - `db/init/003_cdc_role.sh` é shell, e shell com CRLF não roda em container Linux. O
   `.gitattributes` fixa `*.sh` em LF. Sem ele, o arquivo quebraria só na máquina de quem
   clonasse no Windows, que é o pior tipo de bug.
+
+## Emenda de 2026-08-29 — a senha do Grafana também não é segredo, e tratá-la como um quebrou o clone
+
+A senha de admin do Grafana nasceu como segredo gerado, ao lado da chave de PII. Isso
+estava errado, e o erro só apareceu ao clonar o repositório público e rodá-lo — o único
+teste que ninguém tinha feito.
+
+**O Grafana lê `GF_SECURITY_ADMIN_PASSWORD` apenas quando cria o próprio banco.** Depois
+disso o volume manda, e toda alteração no `.env` é ignorada **em silêncio**. O sintoma é um
+`401` do Terraform, num comando que não fala de senha em lugar nenhum. Medido: nem a senha
+antiga nem a nova autenticavam, porque o volume carregava uma terceira, de um ciclo
+anterior.
+
+Pior, a saída óbvia não funciona. `grafana cli admin reset-admin-password` responde
+`Admin password changed successfully ✔` e **não tem efeito** sobre o servidor em execução.
+Verificado: `401` depois do reset, `401` depois de reiniciar o container, e `200` só com
+volume recriado. Uma ferramenta que relata sucesso sem fazer nada é pior que uma que falha.
+
+**Decisão: a senha do Grafana passa a ser valor fixo e declarado**, `grafana-local-only`,
+pelo mesmo argumento que o ADR já faz para o Postgres local. É um painel numa porta de
+`localhost`, com dado sintético, e gerar segredo para ele criou um problema de rotação em
+troca de nenhuma segurança. **A chave de PII continua gerada** — aquela é segredo de
+verdade, e a diferença entre as duas é justamente o ponto deste ADR.
+
+E o `make alerts` passa a checar a autenticação antes do `apply`, para trocar um `401` sem
+contexto por uma frase que diz o que aconteceu e qual comando resolve.

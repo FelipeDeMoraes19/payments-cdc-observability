@@ -4,7 +4,7 @@ env:
 	python scripts/bootstrap_env.py
 
 alerts:
-	python scripts/sync_grafana_admin.py
+	python scripts/check_grafana_auth.py
 	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm terraform init -input=false
 	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm terraform apply -auto-approve -input=false
 
