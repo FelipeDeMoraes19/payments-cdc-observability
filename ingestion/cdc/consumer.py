@@ -67,6 +67,13 @@ def fail_before_feedback() -> bool:
     return os.environ.get("CDC_FAIL_BEFORE_FEEDBACK", "") not in ("", "0")
 
 
+def system_identifier() -> str:
+    with closing(psycopg2.connect(**connection_params())) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT system_identifier::text FROM pg_control_system()")
+            return cursor.fetchone()[0]
+
+
 def ensure_slot() -> str:
     with closing(psycopg2.connect(**connection_params())) as connection:
         connection.autocommit = True
@@ -83,7 +90,7 @@ def ensure_slot() -> str:
             return "created"
 
 
-def build_record(change, lsn: int, transaction: Begin) -> dict:
+def build_record(change, lsn: int, transaction: Begin, system_id: str) -> dict:
     source_values = change.old_values if change.action == "delete" else change.new_values
     key = None
     if source_values is not None and change.relation.key_columns:
@@ -100,6 +107,7 @@ def build_record(change, lsn: int, transaction: Begin) -> dict:
         key = {name: source_values[name] for name in change.relation.key_columns}
     return {
         "source": "postgres",
+        "source_system_id": system_id,
         "ingested_at": datetime.now(timezone.utc),
         "lsn": format_lsn(lsn),
         "lsn_numeric": lsn,
@@ -117,9 +125,10 @@ def build_record(change, lsn: int, transaction: Begin) -> dict:
     }
 
 
-def build_truncate_record(relation, truncate: Truncate, lsn: int, transaction: Begin) -> dict:
+def build_truncate_record(relation, truncate: Truncate, lsn: int, transaction: Begin, system_id: str) -> dict:
     return {
         "source": "postgres",
+        "source_system_id": system_id,
         "ingested_at": datetime.now(timezone.utc),
         "lsn": format_lsn(lsn),
         "lsn_numeric": lsn,
@@ -198,7 +207,7 @@ def _flush(writer: BronzeWriter, cursor, pending: list, confirm_lsn: int, teleme
     return len(pending)
 
 
-def run(writer: BronzeWriter, telemetry: Telemetry) -> int:
+def run(writer: BronzeWriter, telemetry: Telemetry, system_id: str) -> int:
     decoder = Decoder()
     connection = psycopg2.connect(
         connection_factory=LogicalReplicationConnection, **connection_params()
@@ -263,7 +272,8 @@ def run(writer: BronzeWriter, telemetry: Telemetry) -> int:
                             table=relation.name,
                             partition=transaction.commit_time.date().isoformat(),
                             payload=build_truncate_record(
-                                relation, decoded, message.data_start, transaction
+                                relation, decoded, message.data_start, transaction,
+                                system_id,
                             ),
                         )
                     )
@@ -285,7 +295,9 @@ def run(writer: BronzeWriter, telemetry: Telemetry) -> int:
                         lsn=message.data_start,
                         table=decoded.relation.name,
                         partition=transaction.commit_time.date().isoformat(),
-                        payload=build_record(decoded, message.data_start, transaction),
+                        payload=build_record(
+                            decoded, message.data_start, transaction, system_id
+                        ),
                     )
                 )
     finally:
@@ -303,7 +315,7 @@ def main() -> int:
     print("slot {} ({})".format(slot_name(), ensure_slot()), file=sys.stderr)
     telemetry = Telemetry(serve("cdc-consumer") if metrics_enabled() else None)
     try:
-        written = run(writer, telemetry)
+        written = run(writer, telemetry, system_identifier())
     except ContractViolation as violation:
         print("contract violation: {}".format(violation), file=sys.stderr)
         return 2

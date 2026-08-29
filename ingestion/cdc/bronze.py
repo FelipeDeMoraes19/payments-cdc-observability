@@ -16,6 +16,7 @@ class PendingRecord:
 SCHEMA = pa.schema(
     [
         pa.field("source", pa.string(), nullable=False),
+        pa.field("source_system_id", pa.string(), nullable=False),
         pa.field("ingested_at", pa.timestamp("us", tz="UTC"), nullable=False),
         pa.field("lsn", pa.string(), nullable=False),
         pa.field("lsn_numeric", pa.int64(), nullable=False),

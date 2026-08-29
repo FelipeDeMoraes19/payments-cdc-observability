@@ -127,7 +127,46 @@ def apply_truncates(rows, truncates):
     )
 
 
+def assert_one_source_instance(frame, contract: TableContract) -> None:
+    """One database instance, or nothing.
+
+    An LSN only means something inside one Postgres instance. Recreating the
+    volume restarts the write ahead log from near zero, so bronze that survives a
+    reset holds two incomparable sequences, and every comparison across that
+    seam is nonsense that looks like data. It is what made a truncate from a dead
+    instance mark every live row deleted.
+
+    A missing identifier is a violation, not an unknown to wave through. Treating
+    absence as "probably fine" would rebuild the exact hole this check exists to
+    close, and bronze is synthetic and regenerates, so demanding it costs nothing.
+    """
+    if "source_system_id" not in frame.columns:
+        raise SilverError(
+            "bronze for {} has no source_system_id column, so it predates the "
+            "check that an LSN is only comparable within one database instance; "
+            "run make reset and let it rebuild".format(contract.qualified_name)
+        )
+    found = sorted(
+        row["source_system_id"]
+        for row in frame.select("source_system_id").distinct().collect()
+    )
+    if any(value is None for value in found):
+        raise SilverError(
+            "bronze for {} has rows with no source_system_id; run make reset and "
+            "let it rebuild".format(contract.qualified_name)
+        )
+    if len(found) > 1:
+        raise SilverError(
+            "bronze for {} mixes {} database instances ({}); an LSN is only "
+            "comparable within one, so ordering and deduplication across this "
+            "seam are meaningless. run make reset and let it rebuild".format(
+                contract.qualified_name, len(found), ", ".join(found)
+            )
+        )
+
+
 def build_silver(frame, contract: TableContract, mask):
+    assert_one_source_instance(frame, contract)
     rows = cleaned_history(frame.where(F.col("action") != "truncate"), contract)
     assert_castable(rows, contract)
     silver = apply_truncates(rows, frame.where(F.col("action") == "truncate"))

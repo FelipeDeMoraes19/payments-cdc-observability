@@ -15,6 +15,7 @@ down:
 
 reset: env
 	docker compose down -v
+	rm -rf data/bronze data/silver data/gold
 	docker compose up -d
 
 seed:
@@ -34,10 +35,10 @@ runner-shell:
 	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm runner bash
 
 gold:
-	cd transform/dbt && DBT_PROFILES_DIR=. dbt build
+	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm -w /opt/project/transform/dbt -e DBT_PROFILES_DIR=. runner bash -c "dbt build"
 
 docs:
-	cd transform/dbt && DBT_PROFILES_DIR=. dbt docs generate
+	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm -w /opt/project/transform/dbt -e DBT_PROFILES_DIR=. runner bash -c "dbt docs generate"
 	cp transform/dbt/target/index.html docs/index.html
 	cp transform/dbt/target/manifest.json docs/manifest.json
 	cp transform/dbt/target/catalog.json docs/catalog.json
@@ -90,7 +91,7 @@ chaos-orphan-slot:
 
 chaos-fx-gap:
 	python chaos/fx_gap.py
-	@echo "now rebuild gold: make gold. the not_null test on amount_brl should fail"
+	@echo "now rebuild gold: make gold. fx_covers_the_payments should fail"
 
 chaos-pii:
 	PII_MASKING=off $(MAKE) silver
