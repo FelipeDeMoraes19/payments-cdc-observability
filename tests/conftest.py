@@ -23,7 +23,7 @@ def source_params() -> dict:
     )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def source_writers_must_be_stopped(request):
     """The suite and the long running services cannot share the source.
 
@@ -38,7 +38,11 @@ def source_writers_must_be_stopped(request):
     guard in particular needs the consumer running, because an alert that cannot
     fire against a healthy system is exactly what it is looking for.
 
-    make test-e2e stops the service and starts it again. This guard exists so
+    It hangs off the postgres fixture rather than running for everything, so a
+    test that only reads files is never asked to stop a service it does not
+    touch. The guard belongs where the conflict is.
+
+    make test-e2e stops the services and starts them again. This guard exists so
     that running pytest by hand fails with a sentence instead of a mystery.
     """
     if request.node.get_closest_marker("chaos"):
@@ -56,7 +60,7 @@ def source_writers_must_be_stopped(request):
 
 
 @pytest.fixture
-def postgres():
+def postgres(source_writers_must_be_stopped):
     load_env_file()
     connection = psycopg2.connect(**source_params())
     connection.autocommit = True

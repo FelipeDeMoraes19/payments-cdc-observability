@@ -16,6 +16,7 @@ down:
 reset: env
 	docker compose down -v
 	rm -rf data/bronze data/silver data/gold
+	mkdir -p data/bronze data/silver data/gold
 	docker compose up -d
 
 seed:
@@ -35,6 +36,7 @@ runner-shell:
 	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm runner bash
 
 gold:
+	mkdir -p data/gold
 	MSYS_NO_PATHCONV=1 docker compose --profile jobs run --rm -w /opt/project/transform/dbt -e DBT_PROFILES_DIR=. runner bash -c "dbt build"
 
 docs:

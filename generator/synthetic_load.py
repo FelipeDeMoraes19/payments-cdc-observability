@@ -23,6 +23,19 @@ def connection_params() -> dict:
 
 
 def ensure_dimensions(connection, customer_target: int, merchant_target: int) -> tuple:
+    """Creates the dimensions, then touches them so the change stream sees them.
+
+    A replication slot only carries changes made after it exists. A row inserted
+    while the consumer was still starting is invisible to CDC forever, unless
+    something changes it again: capturing change is not capturing state. Five
+    merchants were inserted once at startup, never updated, and never reached
+    bronze at all.
+
+    Production answers this with an initial snapshot, which Debezium has and this
+    consumer does not; see the known limitations in the README. A synthetic
+    generator can answer it by touching its own dimensions, which is what this
+    does.
+    """
     with connection.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM customers")
         for index in range(cursor.fetchone()[0], customer_target):
@@ -44,6 +57,12 @@ def ensure_dimensions(connection, customer_target: int, merchant_target: int) ->
                     "BR",
                 ),
             )
+        cursor.execute(
+            "UPDATE customers SET updated_at = now() WHERE updated_at < now()"
+        )
+        cursor.execute(
+            "UPDATE merchants SET updated_at = now() WHERE updated_at < now()"
+        )
         connection.commit()
         cursor.execute("SELECT customer_id FROM customers ORDER BY customer_id")
         customers = [row[0] for row in cursor.fetchall()]
