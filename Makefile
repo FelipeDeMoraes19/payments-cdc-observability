@@ -81,8 +81,15 @@ chaos-empty:
 
 chaos-late:
 	GEN_LATENESS_HOURS=48 docker compose up -d --force-recreate generator
-	@echo "generator now emits events dated 48h in the past; ingestion volume is unchanged"
-	@echo "wait a minute for bronze, then: make silver"
+	@echo "the generator now emits events dated 48h in the past. ingestion volume is"
+	@echo "unchanged, so the heartbeat alert stays quiet: only freshness, which reads"
+	@echo "event time, notices."
+	@echo ""
+	@echo "freshness reads max(created_at), so rows captured before the injection keep"
+	@echo "it fresh until they age past the ten minute threshold. either wait, or run"
+	@echo "make reset first so only late rows are captured and it reports stale at once."
+	@echo ""
+	@echo "then: make silver && cd transform/dbt && DBT_PROFILES_DIR=. dbt source freshness"
 	@echo "now: cd transform/dbt && DBT_PROFILES_DIR=. dbt source freshness"
 
 chaos-orphan-slot:
