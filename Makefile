@@ -14,6 +14,7 @@ down:
 	docker compose down
 
 reset: env
+	@echo "note: this destroys the Grafana volume too, so run make alerts afterwards"
 	docker compose down -v
 	rm -rf data/bronze data/silver data/gold
 	mkdir -p data/bronze data/silver data/gold
@@ -55,7 +56,9 @@ backfill-fx:
 	MSYS_NO_PATHCONV=1 docker compose --profile orchestration run --rm airflow-init bash -c "airflow backfill create --dag-id fx_daily --from-date $(FROM) --to-date $(TO)"
 
 test:
-	python -m pytest -m 'not e2e and not chaos' -v
+	docker compose stop cdc generator
+	-python -m pytest -m 'not e2e and not chaos' -v
+	docker compose start cdc generator
 
 test-e2e:
 	docker compose stop cdc generator

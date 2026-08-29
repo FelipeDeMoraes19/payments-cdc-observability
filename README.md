@@ -160,7 +160,12 @@ make test-e2e    # ~8min, drives containers; stops the writing services and rest
 make test-chaos  # ~25s, injects failures and asserts the detectors fire
 ```
 
-`make test-e2e` runs before closing a milestone, not on every change.
+`make test` and `make test-e2e` stop the consumer and the generator while they run,
+because fixtures delete every row and a running writer would race them. `make test-e2e`
+runs before closing a milestone, not on every change.
+
+`make reset` destroys the Grafana volume along with the database, so alert rules go with
+it. Run `make alerts` again afterwards — the vacuity guard catches it if you forget.
 
 ## Scope
 
