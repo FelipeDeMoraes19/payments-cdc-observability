@@ -11,7 +11,7 @@ precisam de resposta honesta: **onde ele executa** e **por que é Spark**.
 ## Decisão
 
 **Spark 4.2.0 dentro de um container**, em `local[*]`. **PySpark não é instalado na máquina
-do autor.**
+de desenvolvimento.**
 
 > **Emenda de 2026-08-26.** A decisão original usava a imagem oficial
 > `apache/spark:4.2.0-java21-python3` com uma camada fina por cima. **O raciocínio abaixo
@@ -59,7 +59,7 @@ permissiva. Apagar resolveria hoje e voltaria na próxima troca de imagem.
 
 ## Alternativas rejeitadas
 
-**PySpark local no Windows.** Medido em 2026-08-26 nesta máquina:
+**PySpark local no Windows.** Medido em 2026-08-26 na máquina de desenvolvimento:
 
 ```
 pyspark      : ausente
@@ -76,8 +76,8 @@ que é uma razão ruim para escolher versão de framework.
 
 O Spark no Windows exige `winutils.exe` e `HADOOP_HOME`, e nenhum dos dois existe aqui. A
 forma usual de obtê-los é **baixar um binário Windows não assinado de um repositório
-pessoal no GitHub**. Num repositório público de portfólio isso vira uma dependência
-impossível de defender: não se sabe quem compilou, e ela entra no caminho de execução.
+pessoal no GitHub**. Num repositório público isso vira uma dependência impossível de
+defender: não se sabe quem compilou, e ela entra no caminho de execução.
 
 E o terceiro: quem clonar o repositório teria que repetir esses dois passos na própria
 máquina, o que contradiz a tese de que tudo cabe num `docker compose up`.
@@ -106,8 +106,10 @@ e vale dizer com todas as letras em vez de encenar escala inexistente:
   responde, no README, sobre o mesmo bronze.
 - Nada aqui chega perto de precisar de shuffle particionado por rede.
 
-O Spark está no projeto porque **a falta dele barrou o autor em processos seletivos
-concretos**. É decisão de carreira, tomada de olhos abertos, e o projeto assume o custo.
+O Spark está aqui **deliberadamente**, e o motivo não é o volume: é que ele é a ferramenta
+que o mercado brasileiro de dados usa para esta camada, e este projeto quer exercitar a
+ferramenta que se usa de verdade, não a que seria ótima para um dataset de brinquedo.
+A escolha é consciente e o projeto assume o custo.
 
 O que dá para fazer, e é o que este repositório faz, é usá-lo de um jeito que **escalaria**:
 uma passada de janela em vez de coleta para o driver, sem `collect()` no caminho quente,
@@ -115,8 +117,8 @@ com a deduplicação expressa como `row_number()` particionado pela chave. O có
 se o volume crescer mil vezes; só o `local[*]` viraria outra coisa.
 
 Um projeto que admite que a ferramenta é maior que o problema, e explica por que ela está
-ali, é mais defensável numa entrevista que um que finge o contrário e é desmontado na
-primeira pergunta sobre volume.
+ali, se sustenta melhor que um que finge o contrário e cai na primeira pergunta sobre
+volume.
 
 ## Consequências
 

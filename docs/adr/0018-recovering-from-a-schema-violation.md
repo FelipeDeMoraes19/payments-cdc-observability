@@ -57,8 +57,8 @@ tudo o que não foi consumido, sem sequer delimitar o intervalo perdido.
 ## Consequências
 
 - **Reverter o schema na origem não desbloqueia o consumidor.** Este é o parágrafo que
-  economiza a próxima hora de confusão de quem operar isto, inclusive o autor, que já
-  perdeu essa hora uma vez.
+  economiza a próxima hora de confusão de quem operar isto — uma hora que já foi perdida
+  aqui, exatamente assim.
 - Enquanto o consumidor está parado, **o slot não avança e o WAL se acumula**. Uma violação
   de contrato não tratada vira, com tempo suficiente, o modo de falha do slot órfão do
   ADR 0008. Os dois estão ligados, e o alerta de WAL retido do Marco 3 cobre os dois.

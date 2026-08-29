@@ -68,3 +68,61 @@ per model in `run_results.json`. Exporting it to Prometheus would need a Pushgat
 the batch steps, adding a service to feed a number no alert reads. The orchestrator already
 measures it; this does not duplicate it.
 
+## A tool that reported success and did nothing
+
+This is the one worth reading, because the repository's own thesis happened to the person
+writing it.
+
+The public repository was cloned and run, which is the one test nobody had done. `make
+alerts` failed with a bare `401` from Terraform — a command that mentions no passwords
+anywhere.
+
+The cause: **Grafana reads `GF_SECURITY_ADMIN_PASSWORD` only when it first creates its own
+database.** After that the volume holds whatever was set then, and every later change to
+`.env` is ignored in silence. Measured: neither the old password nor the new one
+authenticated, because the volume was carrying a third one from an earlier cycle. A setting
+that looks applied and is not.
+
+### The part that matters
+
+The obvious fix is `grafana cli admin reset-admin-password`. It prints:
+
+```
+Admin password changed successfully ✔
+```
+
+**It had no effect.** Measured, in order: `401` after the reset, `401` after restarting the
+container, `200` only once the volume was recreated. The command reports success against a
+running server and does not change what that server accepts.
+
+A fix was written around it, committed, and reported as done. It was not done. **Only
+re-running the clean clone caught it** — the same clean clone that had found the original
+bug, run again because the fix had not been verified in the situation that produced the
+failure.
+
+Three things sit in that sequence, and each is the thesis of this repository:
+
+**A detector that reports success without doing anything is worse than no detector.** It is
+the same shape as an alert that cannot fire, as a healthcheck that answers the easy
+question, as a test that passes on a substring. Every one of those was found here too, and
+this one was found last because it was the one wearing the most convincing disguise: a green
+checkmark from an official tool.
+
+**Confirmation came from the tool, not from the world.** The success message was believed
+because it was emphatic. What settled it was `curl` returning `401`, three times, against
+the thing that actually had to work.
+
+**Verifying a fix means reproducing the situation that produced the failure.** The fix was
+plausible, the command exited zero, and both facts were irrelevant. The only evidence that
+counted was another clean clone.
+
+### What was done about it
+
+The password stopped being a generated secret. It is now a fixed declared value, on the same
+argument [ADR 0009](adr/0009-dedicated-replication-role.md) already makes for the local
+Postgres: a dashboard on `localhost` over synthetic data is not a secret, and generating one
+bought a rotation problem and no security. The PII key stays generated, and the difference
+between the two is the point.
+
+`make alerts` now checks authentication before applying and explains the failure with the
+command that resolves it, instead of letting Terraform emit a `401` that explains nothing.

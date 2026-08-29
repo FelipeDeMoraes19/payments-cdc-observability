@@ -37,7 +37,7 @@ Duas camadas, porque elas não são alternativas.
 
 **Prevenção: `make reset` apaga `data/bronze`, `data/silver` e `data/gold`.** Ele destrói o
 volume, então esses diretórios passam a descrever um banco que não existe mais. É o caso
-comum, e o caso comum é o próprio autor.
+comum, que é quem desenvolve o projeto.
 
 **Detecção: o bronze grava `source_system_id`** — o `system_identifier` de
 `pg_control_system()`, que é único por instância — e o silver **recusa processar** bronze

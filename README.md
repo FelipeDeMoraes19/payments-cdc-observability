@@ -112,7 +112,9 @@ matches a slice of time — the rate extractor can keep it and a replication slo
 
 - [Running each stage by hand](docs/running.md) — querying bronze, silver, gold, backfill
 - [What went wrong while building this](docs/what-went-wrong.md) — three defects that were
-  the same defect: a wrong assumption about the normal a detector measures against
+  the same defect, and a tool that printed `Admin password changed successfully ✔` while
+  changing nothing, which was committed as fixed and caught only by re-running the clean
+  clone
 
 ## Known limitations
 

@@ -120,8 +120,8 @@ simples deixou de estar disponível.
 
 **Decisão: o mesmo container Postgres, num banco separado**, com papel próprio criado no
 `db/init`. Não adiciona serviço ao `compose up`, e é o arranjo que qualquer deploy real
-usa — SQLite num repositório de portfólio se lê como desconhecimento do arranjo de
-produção, a menos que um documento diga o contrário, e aqui nem é possível.
+usa. SQLite aqui sugeriria que o arranjo de produção não foi considerado, e neste caso
+ele nem é possível.
 
 Rejeitado: **um segundo Postgres só para os metadados**. Separação mais limpa e um serviço
 a mais para quem só quer ver o projeto rodar.
