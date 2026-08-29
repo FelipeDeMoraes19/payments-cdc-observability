@@ -39,6 +39,12 @@ document that explains it.
 | Nothing is being ingested at all | `make chaos-empty` stops the generator | a heartbeat alert over `increase(cdc_records_written_total[10m])` | **Yes** — `tests/test_alerts_can_fire.py` proves the alert can fire |
 | **A blind alert** | `make chaos-blind` injects nothing, because nothing can be injected | **nothing — the alert queries a label no series carries and treats no data as normal** | **No, on purpose** — and `tests/test_alerts_can_fire.py` asserts it is still blind for both reasons |
 
+The guard is not a display piece. It caught a real gap during this milestone: `make reset`
+destroys the Grafana volume along with the database, and the guard reported *"alerts.tf
+declares 3 rules and Grafana has 0; run make alerts"* instead of passing over an empty list.
+A mechanism that has done its job once is a different thing from one that has only been
+demonstrated.
+
 **The last row is the point.** An alert whose query filters a label no series carries, with
 missing data configured as normal. Two choices, each defensible alone, fatal together —
 which is how alerts go blind in production. It stays, documented, because *"we do not
@@ -110,9 +116,12 @@ matches a slice of time — the rate extractor can keep it and a replication slo
 
 ## Known limitations
 
-**Bronze grows without bound.** Roughly 1440 small files a day at the default rate, and
-nothing compacts or expires them. Out of scope, and written down because a repository about
-documenting what it does not detect should document what it does not clean up.
+**Bronze grows without bound.** Nothing compacts or expires the file each batch writes.
+Measured on this machine after roughly a day of the stack running: **22,222 files, 186 MB,
+6 KB average**, and the Spark job went from under a minute to over ten. That is the small
+file problem, reached in a day. Compaction and retention are real work and out of scope;
+this is written down because a repository about documenting what it does not detect should
+document what it does not clean up. `make reset` clears it.
 
 **CDC captures change, not state.** A replication slot only carries what happens after it
 exists, so a row inserted before the consumer started is invisible until something changes
