@@ -1,4 +1,6 @@
 locals {
+  postgres_plugin_id = "grafana-postgresql-datasource"
+
   dashboard = {
     title         = "payments pipeline"
     uid           = "payments-pipeline"
@@ -31,7 +33,7 @@ locals {
         type    = "table"
         title   = "Replication slots — retained WAL grows on make chaos-orphan-slot"
         gridPos = { h = 8, w = 12, x = 0, y = 8 }
-        datasource = { type = "postgres", uid = grafana_data_source.payments_postgres.uid }
+        datasource = { type = local.postgres_plugin_id, uid = grafana_data_source.payments_postgres.uid }
         targets = [{
           refId    = "A"
           format   = "table"
