@@ -10,7 +10,7 @@ locals {
     panels = [
       {
         type    = "timeseries"
-        title   = "Change events reaching bronze — flat means make chaos-empty"
+        title   = "Change events reaching bronze - flat means make chaos-empty"
         gridPos = { h = 8, w = 12, x = 0, y = 0 }
         datasource = { type = "prometheus", uid = grafana_data_source.prometheus.uid }
         targets = [{
@@ -21,7 +21,7 @@ locals {
       },
       {
         type    = "timeseries"
-        title   = "Confirmed LSN — flat means the slot stopped advancing"
+        title   = "Confirmed LSN - flat means the slot stopped advancing"
         gridPos = { h = 8, w = 12, x = 12, y = 0 }
         datasource = { type = "prometheus", uid = grafana_data_source.prometheus.uid }
         targets = [{
@@ -31,19 +31,20 @@ locals {
       },
       {
         type    = "table"
-        title   = "Replication slots — retained WAL grows on make chaos-orphan-slot"
+        title   = "Replication slots - retained WAL grows on make chaos-orphan-slot"
         gridPos = { h = 8, w = 12, x = 0, y = 8 }
         datasource = { type = local.postgres_plugin_id, uid = grafana_data_source.payments_postgres.uid }
         targets = [{
-          refId    = "A"
-          format   = "table"
-          rawQuery = true
+          refId      = "A"
+          format     = "table"
+          rawQuery   = true
+          editorMode = "code"
           rawSql   = "SELECT slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained_wal, confirmed_flush_lsn FROM pg_replication_slots ORDER BY slot_name"
         }]
       },
       {
         type    = "alertlist"
-        title   = "Alert rules — one of them cannot fire, on purpose"
+        title   = "Alert rules - one of them cannot fire, on purpose"
         gridPos = { h = 8, w = 12, x = 12, y = 8 }
         options = {
           viewMode                 = "list"
