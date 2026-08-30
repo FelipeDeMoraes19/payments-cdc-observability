@@ -28,15 +28,15 @@ locals {
         }]
       },
       {
-        type    = "timeseries"
-        title   = "WAL retained by replication slots — grows on make chaos-orphan-slot"
+        type    = "table"
+        title   = "Replication slots — retained WAL grows on make chaos-orphan-slot"
         gridPos = { h = 8, w = 12, x = 0, y = 8 }
         datasource = { type = "postgres", uid = grafana_data_source.payments_postgres.uid }
         targets = [{
           refId    = "A"
-          format   = "time_series"
+          format   = "table"
           rawQuery = true
-          rawSql   = "SELECT now() AS time, slot_name AS metric, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS value FROM pg_replication_slots"
+          rawSql   = "SELECT slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained_wal, confirmed_flush_lsn FROM pg_replication_slots ORDER BY slot_name"
         }]
       },
       {
@@ -44,11 +44,19 @@ locals {
         title   = "Alert rules — one of them cannot fire, on purpose"
         gridPos = { h = 8, w = 12, x = 12, y = 8 }
         options = {
-          viewMode       = "list"
-          groupMode      = "default"
-          maxItems       = 10
-          sortOrder      = 1
+          viewMode                 = "list"
+          groupMode                = "default"
+          maxItems                 = 10
+          sortOrder                = 1
           alertInstanceLabelFilter = ""
+          showInstances            = false
+          stateFilter = {
+            firing   = true
+            pending  = true
+            noData   = true
+            normal   = true
+            error    = true
+          }
         }
       },
     ]
