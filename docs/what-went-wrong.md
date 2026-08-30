@@ -68,53 +68,65 @@ per model in `run_results.json`. Exporting it to Prometheus would need a Pushgat
 the batch steps, adding a service to feed a number no alert reads. The orchestrator already
 measures it; this does not duplicate it.
 
-## A tool that reported success and did nothing
+## The mechanism I invented, and how long it stood
 
-This is the one worth reading, because the repository's own thesis happened to the person
-writing it.
+This one is worth reading, because the repository's thesis happened to the person writing
+it, twice, and the second time was worse.
 
 The public repository was cloned and run, which is the one test nobody had done. `make
 alerts` failed with a bare `401` from Terraform — a command that mentions no passwords
 anywhere.
 
-The cause: **Grafana reads `GF_SECURITY_ADMIN_PASSWORD` only when it first creates its own
-database.** After that the volume holds whatever was set then, and every later change to
-`.env` is ignored in silence. Measured: neither the old password nor the new one
-authenticated, because the volume was carrying a third one from an earlier cycle. A setting
-that looks applied and is not.
+### What is true, and measured
 
-### The part that matters
-
-The obvious fix is `grafana cli admin reset-admin-password`. It prints:
+**Grafana reads `GF_SECURITY_ADMIN_PASSWORD` only when it first creates its own database.**
+After that the volume holds whatever was set then, and later edits to `.env` are ignored in
+silence. Measured by changing only `.env` and recreating the container:
 
 ```
-Admin password changed successfully ✔
+new password from .env, after recreating the container : 401
+password the volume still holds                        : 200
 ```
 
-**It had no effect.** Measured, in order: `401` after the reset, `401` after restarting the
-container, `200` only once the volume was recreated. The command reports success against a
-running server and does not change what that server accepts.
+A setting that looks applied and is not. That is the finding, and it survives.
 
-A fix was written around it, committed, and reported as done. It was not done. **Only
-re-running the clean clone caught it** — the same clean clone that had found the original
-bug, run again because the fix had not been verified in the situation that produced the
-failure.
+### What was not true, and stood in this repository for a day
 
-Three things sit in that sequence, and each is the thesis of this repository:
+This file, and ADR 0009, both stated that `grafana cli admin reset-admin-password` prints
+`Admin password changed successfully ✔` **without taking effect** — and offered that as a
+measured fact, with three data points behind it.
 
-**A detector that reports success without doing anything is worse than no detector.** It is
-the same shape as an alert that cannot fire, as a healthcheck that answers the easy
-question, as a test that passes on a substring. Every one of those was found here too, and
-this one was found last because it was the one wearing the most convincing disguise: a green
-checkmark from an official tool.
+**It is false.** Re-tested the next day, in both invocation forms: the command works. The new
+password authenticates with `200`, the previous one drops to `401`.
 
-**Confirmation came from the tool, not from the world.** The success message was believed
-because it was emphatic. What settled it was `curl` returning `401`, three times, against
-the thing that actually had to work.
+What happened on the day was a `401` observed shortly after running the command, from which
+a causal mechanism was written down. The variable was never isolated. The real cause of that
+`401` was never diagnosed, and it is recorded here as undiagnosed rather than explained,
+because a convincing wrong explanation in a permanent record is worse than an admitted gap.
 
-**Verifying a fix means reproducing the situation that produced the failure.** The fix was
-plausible, the command exited zero, and both facts were irrelevant. The only evidence that
-counted was another clean clone.
+### The part that is actually the lesson
+
+The first failure was ordinary: a bad diagnosis under time pressure. The second was not.
+
+**A confident causal mechanism went into a permanent record on the strength of one
+unisolated observation**, was committed, was reported as understood, and was then written
+into an ADR and into this file as a measured finding. It stood for a day. It came apart the
+moment someone tried to build on it — which is the only reason it came apart at all.
+
+Three things sit in that, and each is what this repository is about:
+
+**A success message is scoped to what the tool believes it is acting on.** So is a green
+test, so is a healthcheck, so is an alert that never fires. Every mechanism here that
+reports "fine" is answering a narrower question than the one being asked of it.
+
+**"Measured" is a claim about method, not about confidence.** Three data points were
+collected and none of them isolated the variable, and writing the number down made the
+conclusion feel established. The vacuity guard in this repository exists because a test can
+pass for the wrong reason; the same is true of a person.
+
+**What caught it was reproduction, not review.** The correction did not come from re-reading
+the ADR, which had been re-read. It came from running the command again, cold, because
+somebody was about to depend on it.
 
 ### What was done about it
 
@@ -124,5 +136,8 @@ Postgres: a dashboard on `localhost` over synthetic data is not a secret, and ge
 bought a rotation problem and no security. The PII key stays generated, and the difference
 between the two is the point.
 
-`make alerts` now checks authentication before applying and explains the failure with the
-command that resolves it, instead of letting Terraform emit a `401` that explains nothing.
+`make alerts` checks authentication before applying and explains the failure with the command
+that resolves it, instead of letting Terraform emit a `401` that explains nothing.
+
+And both the ADR and this section were rewritten to say what is known and to mark what is
+not.

@@ -72,10 +72,27 @@ disso o volume manda, e toda alteração no `.env` é ignorada **em silêncio**.
 antiga nem a nova autenticavam, porque o volume carregava uma terceira, de um ciclo
 anterior.
 
-Pior, a saída óbvia não funciona. `grafana cli admin reset-admin-password` responde
-`Admin password changed successfully ✔` e **não tem efeito** sobre o servidor em execução.
-Verificado: `401` depois do reset, `401` depois de reiniciar o container, e `200` só com
-volume recriado. Uma ferramenta que relata sucesso sem fazer nada é pior que uma que falha.
+Medido em 2026-08-29, alterando só o `.env` e recriando o container:
+
+```
+senha nova do .env, apos recriar o container : 401
+senha que o volume guarda                    : 200
+```
+
+> **Correção de 2026-08-30.** Este ADR afirmava que `grafana cli admin reset-admin-password`
+> responde `Admin password changed successfully ✔` **sem ter efeito**. **Isso é falso** e foi
+> retirado. Reteste em 2026-08-30, nas duas formas de invocação: o comando **funciona** — a
+> senha nova passa a autenticar com `200` e a anterior passa a `401`.
+>
+> O que aconteceu no dia foi um `401` observado logo depois de rodar o comando, do qual eu
+> concluí um mecanismo causal sem isolar a variável. Não reproduz. A causa real daquele `401`
+> não foi diagnosticada, e registrar "não sei" é mais honesto que manter uma explicação
+> convincente e errada num documento permanente.
+>
+> O erro não é o diagnóstico ruim: é ter escrito um mecanismo afirmativo em registro
+> permanente a partir de **uma observação não isolada**, e ele ficou de pé por um dia — até
+> alguém tentar construir em cima. É exatamente a falha que este repositório documenta,
+> cometida por quem o escreve.
 
 **Decisão: a senha do Grafana passa a ser valor fixo e declarado**, `grafana-local-only`,
 pelo mesmo argumento que o ADR já faz para o Postgres local. É um painel numa porta de
