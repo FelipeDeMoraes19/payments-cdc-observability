@@ -32,6 +32,7 @@ resource "grafana_data_source" "payments_postgres" {
   })
 
   json_data_encoded = jsonencode({
+    database        = var.postgres_database
     sslmode         = "disable"
     postgresVersion = 1600
   })
