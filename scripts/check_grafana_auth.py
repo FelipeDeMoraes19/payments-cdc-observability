@@ -19,9 +19,14 @@ def main() -> int:
 
     Grafana reads GF_SECURITY_ADMIN_PASSWORD only when it initialises its own
     database. After that the volume holds whatever was set then, and a later
-    change to .env is ignored in silence. The CLI's reset-admin-password reports
-    success against a running server and does not take effect, so it is not a
-    way out. Recreating the volume is.
+    change to .env is ignored in silence. Measured: after editing .env and
+    recreating the container, the new password gets 401 and the one the volume
+    holds gets 200.
+
+    Recreating the volume resolves it. So does grafana cli
+    admin reset-admin-password, which works; an earlier version of this
+    docstring claimed it did not, and that claim was retracted in ADR 0009 for
+    failing to reproduce.
     """
     user = env("GRAFANA_ADMIN_USER", "admin")
     password = env("GRAFANA_ADMIN_PASSWORD")

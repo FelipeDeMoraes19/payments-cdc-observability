@@ -70,8 +70,10 @@ measures it; this does not duplicate it.
 
 ## The mechanism I invented, and how long it stood
 
-This one is worth reading, because the repository's thesis happened to the person writing
-it, twice, and the second time was worse.
+This repository is about detectors that report "fine" while seeing nothing: an alert that
+cannot fire, a healthcheck that answers the easy question, a test that passes for the wrong
+reason. What follows is that same failure happening to the person writing it — twice, and
+the second time was worse than the first.
 
 The public repository was cloned and run, which is the one test nobody had done. `make
 alerts` failed with a bare `401` from Terraform — a command that mentions no passwords
@@ -115,14 +117,13 @@ moment someone tried to build on it — which is the only reason it came apart a
 
 Three things sit in that, and each is what this repository is about:
 
-**A success message is scoped to what the tool believes it is acting on.** So is a green
-test, so is a healthcheck, so is an alert that never fires. Every mechanism here that
-reports "fine" is answering a narrower question than the one being asked of it.
+**A plausible explanation is not a tested one.** The `401` was real and the command had
+just run, and the story joining them was never checked. Nothing about it looked wrong, which
+is precisely why it survived being re-read.
 
 **"Measured" is a claim about method, not about confidence.** Three data points were
-collected and none of them isolated the variable, and writing the number down made the
-conclusion feel established. The vacuity guard in this repository exists because a test can
-pass for the wrong reason; the same is true of a person.
+collected and not one of them isolated the variable. Writing numbers down made the
+conclusion feel settled. A test can pass for the wrong reason, and so can a person.
 
 **What caught it was reproduction, not review.** The correction did not come from re-reading
 the ADR, which had been re-read. It came from running the command again, cold, because
